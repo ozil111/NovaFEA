@@ -1,0 +1,27 @@
+{
+  "element_type": "tet4",
+  "material_type": "neo_hookean",
+  "density": 1.0,
+  "mesh": {
+    "type": "tet4"
+  },
+  "boundary_conditions": {
+    "fixed_nodes": [0, 2, 3]
+  },
+  "material_properties": {
+    "mu": 1.0,
+    "bulk": 10.0
+  },
+  "initial_conditions": {
+    "initial_velocity": [
+      {
+        "node": 1,
+        "value": [0.1, 0.0, 0.0]
+      }
+    ]
+  },
+  "time_integration": {
+    "dt": 1e-5,
+    "num_steps": 100000
+  }
+}

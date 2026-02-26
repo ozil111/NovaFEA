@@ -8,3 +8,4 @@ logs
 result
 iotools
 *.pkl
+*.pyc
