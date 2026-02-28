@@ -52,9 +52,12 @@ void LoadSystem::apply_nodal_loads(entt::registry& registry, double t) {
 
             // Calculate scaling factor from curve if available
             double scale_factor = 1.0;
-            if (registry.all_of<Component::CurveRef>(load_entity)) {
-                const auto& curve_ref = registry.get<Component::CurveRef>(load_entity);
-                scale_factor = CurveSystem::evaluate_curve(registry, curve_ref.curve_entity, t);
+            entt::entity curve_ent = nodal_load.curve_entity;
+            if (curve_ent == entt::null && registry.all_of<Component::CurveRef>(load_entity)) {
+                curve_ent = registry.get<Component::CurveRef>(load_entity).curve_entity;
+            }
+            if (registry.valid(curve_ent)) {
+                scale_factor = CurveSystem::evaluate_curve(registry, curve_ent, t);
             }
 
             // Calculate scaled load value

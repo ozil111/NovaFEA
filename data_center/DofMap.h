@@ -9,6 +9,8 @@
 #pragma once
 
 #include <vector>
+#include <string>
+#include <unordered_map>
 #include "entt/entt.hpp"
 
 /**
@@ -44,6 +46,12 @@ struct DofMap {
      * @details 未来可扩展支持不同类型的节点（如梁节点有 6 个自由度）
      */
     int dofs_per_node = 3;
+
+    // ------------------------------------------------------------------
+    // 曲线 (Curve) 映射：统一存放时间曲线 / 材料实验曲线等
+    // ------------------------------------------------------------------
+    std::unordered_map<std::string, entt::entity> curve_name_to_entity;
+    std::unordered_map<entt::entity, std::string> curve_entity_to_name;
 
     /**
      * @brief 检查 entity 是否在映射中

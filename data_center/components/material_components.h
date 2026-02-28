@@ -11,6 +11,7 @@
 #include <vector>
 #include <string>
 #include <Eigen/Dense>
+#include "entt/entt.hpp"
 
 /**
  * @namespace Component
@@ -38,6 +39,14 @@ namespace Component {
     };
 
     /**
+     * @brief [通用] 材料类型字符串（来自 Simdroid 的 MaterialType/Type）
+     * @details 例如: "IsotropicElastic"(LAW1), "IsotropicPlasticJC"(LAW2), "RateDependentPlastic"(LAW36)
+     */
+    struct MaterialModel {
+        std::string value;
+    };
+
+    /**
      * @brief [派生数据] 线性弹性本构矩阵 (D Matrix)
      * @details 这是一个运行时生成的组件，挂载在 Material 实体上。
      * 对于 3D 各向同性材料，这是一个 6x6 矩阵。
@@ -61,10 +70,10 @@ namespace Component {
         bool fit_from_data; // 对应 mode 0 (false) 或 1 (true)
         
         // 仅在 fit_from_data == true 时有意义
-        std::vector<int> uniaxial_funcs;
-        std::vector<int> biaxial_funcs;
-        std::vector<int> planar_funcs;
-        std::vector<int> volumetric_funcs;
+        std::vector<entt::entity> uniaxial_funcs;
+        std::vector<entt::entity> biaxial_funcs;
+        std::vector<entt::entity> planar_funcs;
+        std::vector<entt::entity> volumetric_funcs;
         double nu; // 泊松比，仅用于曲线拟合
     };
 
@@ -103,8 +112,73 @@ namespace Component {
         std::vector<double> d_i;
     };
 
-    // ... 未来可以继续添加 Type 2xx (粘弹), 3xx (弹塑性) 的参数组件 ...
-    // struct ViscoelasticParams { ... };
-    // struct PlasticParams { ... };
+    /**
+     * @brief [LAW2] IsotropicPlasticJC (Johnson-Cook) 参数
+     * @details 对应 MaterialType == "IsotropicPlasticJC"
+     * 字段名尽量与 docs/simdroid_ex_material.md 的 MaterialConstants 对齐。
+     */
+    struct IsotropicPlasticParams {
+        // A, B, n, C
+        double yield_stress_A = 0.0;     // YieldStress
+        double hardening_coef_B = 0.0;   // HardeningCoefB
+        double hardening_exp_n = 0.0;    // HardeningExpN
+        double rate_coef_C = 0.0;        // RateCoef
+
+        // Hardening / temperature
+        double hardening_mode = 0.0;     // HardeningMode
+        double temperature_exp_m = 0.0;  // TemperatureExp
+        double melt_temperature = 0.0;   // MeltTemperature
+        double env_temperature = 0.0;    // EnvTemperature
+
+        // Misc
+        double ref_strain_rate = 1.0;    // RefStrainRate
+        double specific_heat = 0.0;      // SpecificHeat
+    };
+
+    /**
+     * @brief [LAW36] RateDependentPlastic 参数
+     * @details 对应 MaterialType == "RateDependentPlastic"
+     */
+    struct RateDependentPlasticParams {
+        double hardening_mode = 0.0;               // HardeningMode
+        double failure_plastic_strain = 0.0;       // FailurePlasticStrain
+        double fail_begin_tensile_strain = 0.0;    // FailBeginTensileStrain
+        double fail_end_tensile_strain = 0.0;      // FailEndTensileStrain
+        double elem_del_tensile_strain = 0.0;      // ElemDelTensileStrain
+        std::string strain_rate_type;              // StrainRateType
+        std::vector<std::string> yield_curves;     // StrainAndStrainRateYieldCurve
+        std::vector<double> strain_rates;          // StrainRate
+    };
+
+    // ---------------------------------------------------------------------
+    // MaterialType <-> typeid 映射（集中维护，避免在组件/系统里散落魔法数）
+    // ---------------------------------------------------------------------
+
+    inline int material_typeid_from_model(const std::string& model) {
+        if (model == "IsotropicElastic")      return 1;
+        if (model == "Polynomial")            return 101;
+        if (model == "ReducedPolynomial")     return 102;
+        if (model == "OgdenRubber"
+            || model == "Ogden2"
+            || model == "Ogden")             return 103;
+
+        // 预留：弹塑性 3xx 段
+        if (model == "IsotropicPlasticJC")    return 301; // LAW2
+        if (model == "RateDependentPlastic")  return 302; // LAW36
+
+        return 0; // 未知 / 默认
+    }
+
+    inline std::string material_model_from_typeid(int typeid_value) {
+        switch (typeid_value) {
+        case 1:   return "IsotropicElastic";
+        case 101: return "Polynomial";
+        case 102: return "ReducedPolynomial";
+        case 103: return "OgdenRubber";
+        case 301: return "IsotropicPlasticJC";
+        case 302: return "RateDependentPlastic";
+        default:  return {};
+        }
+    }
 
 } // namespace Component

@@ -535,8 +535,9 @@ void JsonParser::parse_loads(
                 nodal_load.type_id = type_id;
                 nodal_load.dof = load["dof"];
                 nodal_load.value = load["value"];
+                // curve_entity 在下方解析 curve 后 patch 写入
                 registry.emplace<Component::NodalLoad>(e, nodal_load);
-                spdlog::debug("  Created NodalLoad {}: dof={}, value={}", 
+                spdlog::debug("  Created NodalLoad {}: dof={}, value={}",
                               lid, nodal_load.dof, nodal_load.value);
                 break;
             }
@@ -586,9 +587,9 @@ void JsonParser::parse_loads(
             }
         }
         
-        // 为load添加CurveRef
-        if (curve_entity != entt::null) {
-            registry.emplace<Component::CurveRef>(e, curve_entity);
+        // 将 curve 写入 NodalLoad.curve_entity（仅节点载荷）
+        if (curve_entity != entt::null && registry.all_of<Component::NodalLoad>(e)) {
+            registry.patch<Component::NodalLoad>(e, [curve_entity](auto& nl) { nl.curve_entity = curve_entity; });
         }
 
         load_id_map[lid] = e;

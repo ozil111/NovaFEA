@@ -5,9 +5,12 @@
 #include "components/simdroid_components.h"
 #include "components/material_components.h"
 #include "../../data_center/components/load_components.h"
+#include "../../data_center/DofMap.h"
 #include "../parser_base/string_utils.h"
 #include "nlohmann/json.hpp"
 #include "spdlog/spdlog.h"
+
+#include <filesystem>
 
 #include <algorithm>
 #include <cctype>
@@ -267,16 +270,292 @@ void SimdroidParser::parse_control_json(const std::string& path, DataContext& ct
     
     auto& registry = ctx.registry;
 
+    // ---------------------------------------------------------------------
+    // 预解析：Function 名称列表 -> Curve 实体
+    // 用于超弹性材料的 TestCurve-* 列表 (HyperelasticMode::*_funcs)
+    //  - 统一复用 Component::Curve / CurveID
+    //  - 曲线名 -> entity 映射存放在 registry.ctx().get<DofMap>()
+    //  - 曲线数据直接从同名 .txt 中读取（格式参考 convert_function.py）
+    // ---------------------------------------------------------------------
+    DofMap* dof_map = nullptr;
+    if (registry.ctx().contains<DofMap>()) {
+        dof_map = &registry.ctx().get<DofMap>();
+    } else {
+        dof_map = &registry.ctx().emplace<DofMap>();
+    }
+
+    // 控制文件所在目录，用于定位同名 .txt
+    std::filesystem::path control_dir = std::filesystem::path(path).parent_path();
+
+    auto get_or_create_curve_entity_by_name = [&](const std::string& fname) -> entt::entity {
+        // 已存在映射则直接返回
+        auto it = dof_map->curve_name_to_entity.find(fname);
+        if (it != dof_map->curve_name_to_entity.end()) {
+            return it->second;
+        }
+
+        // 创建新的 Curve 实体
+        entt::entity curve_e = registry.create();
+
+        // 目前 CurveID 仅用于调试/区分，这里使用当前映射大小作为简单 ID
+        int cid = static_cast<int>(dof_map->curve_name_to_entity.size());
+        registry.emplace<Component::CurveID>(curve_e, cid);
+
+        Component::Curve curve{};
+        curve.type = "tabular"; // 通用 1D 数据点
+
+        // 从同名 .txt 读取数据：第一列 strain(x), 第二列 stress(y)，忽略以 '#' 开头的行
+        std::filesystem::path txt_path = control_dir / (fname + ".txt");
+        std::ifstream fin(txt_path);
+        if (!fin.is_open()) {
+            spdlog::warn("Function '{}' expects txt file '{}', but it cannot be opened.", fname, txt_path.string());
+        } else {
+            std::string line;
+            while (std::getline(fin, line)) {
+                if (line.empty()) continue;
+                if (!line.empty() && line[0] == '#') continue;
+
+                std::istringstream iss(line);
+                double col1 = 0.0, col2 = 0.0;
+                if (!(iss >> col1 >> col2)) continue;
+
+                // 约定：x = strain, y = stress
+                curve.x.push_back(col1);
+                curve.y.push_back(col2);
+            }
+            if (curve.x.empty()) {
+                spdlog::warn("Txt file '{}' for Function '{}' contains no valid data rows.", txt_path.string(), fname);
+            }
+        }
+
+        registry.emplace<Component::Curve>(curve_e, std::move(curve));
+        dof_map->curve_name_to_entity.emplace(fname, curve_e);
+        dof_map->curve_entity_to_name.emplace(curve_e, fname);
+
+        return curve_e;
+    };
+
+    // 预先根据 Function 块创建对应的 Curve 实体（如果存在）
+    if (j.contains("Function") && j["Function"].is_object()) {
+        for (auto& [fname, fval] : j["Function"].items()) {
+            (void)fval;
+            (void)get_or_create_curve_entity_by_name(fname);
+        }
+        spdlog::info("Simdroid Functions parsed: {} entries mapped to Curve entities.", dof_map->curve_name_to_entity.size());
+    }
+
     if (j.contains("Material") && j["Material"].is_object()) {
         for (auto& [key, val] : j["Material"].items()) {
             const entt::entity mat_e = registry.create();
-            if (val.contains("MaterialConstants")) {
-                auto& cons = val["MaterialConstants"];
-                Component::LinearElasticParams params;
-                if (cons.contains("E")) params.E = cons["E"];
-                if (cons.contains("Nu")) params.nu = cons["Nu"];
-                if (val.contains("Density")) params.rho = val["Density"];
+
+            // Material type (prefer Simdroid's "MaterialType", fallback to legacy "Type")
+            const std::string mat_type = val.value("MaterialType", val.value("Type", ""));
+            if (!mat_type.empty()) {
+                registry.emplace<Component::MaterialModel>(mat_e, mat_type);
+            }
+
+            // Common: density + linear elastic constants (many plastic laws still require E, nu)
+            Component::LinearElasticParams params{};
+            if (val.contains("Density")) params.rho = val["Density"].get<double>();
+
+            if (val.contains("MaterialConstants") && val["MaterialConstants"].is_object()) {
+                const auto& cons = val["MaterialConstants"];
+
+                // Support both canonical keys and older variants.
+                if (cons.contains("ElasticModulus")) params.E = cons["ElasticModulus"].get<double>();
+                else if (cons.contains("E")) params.E = cons["E"].get<double>();
+                else if (cons.contains("YoungModulus")) params.E = cons["YoungModulus"].get<double>();
+
+                if (cons.contains("PoissonRatio")) params.nu = cons["PoissonRatio"].get<double>();
+                else if (cons.contains("Nu")) params.nu = cons["Nu"].get<double>();
+                else if (cons.contains("nu")) params.nu = cons["nu"].get<double>();
+
                 registry.emplace<Component::LinearElasticParams>(mat_e, params);
+
+                // LAW2: IsotropicPlasticJC (Johnson-Cook)
+                if (mat_type == "IsotropicPlasticJC") {
+                    Component::IsotropicPlasticParams pl{};
+                    if (cons.contains("YieldStress")) pl.yield_stress_A = cons["YieldStress"].get<double>();
+                    if (cons.contains("HardeningCoefB")) pl.hardening_coef_B = cons["HardeningCoefB"].get<double>();
+                    if (cons.contains("HardeningExpN")) pl.hardening_exp_n = cons["HardeningExpN"].get<double>();
+                    if (cons.contains("RateCoef")) pl.rate_coef_C = cons["RateCoef"].get<double>();
+                    if (cons.contains("HardeningMode")) pl.hardening_mode = cons["HardeningMode"].get<double>();
+                    if (cons.contains("TemperatureExp")) pl.temperature_exp_m = cons["TemperatureExp"].get<double>();
+                    if (cons.contains("MeltTemperature")) pl.melt_temperature = cons["MeltTemperature"].get<double>();
+                    if (cons.contains("EnvTemperature")) pl.env_temperature = cons["EnvTemperature"].get<double>();
+                    if (cons.contains("RefStrainRate")) pl.ref_strain_rate = cons["RefStrainRate"].get<double>();
+                    if (cons.contains("SpecificHeat")) pl.specific_heat = cons["SpecificHeat"].get<double>();
+                    registry.emplace<Component::IsotropicPlasticParams>(mat_e, std::move(pl));
+                }
+
+                // LAW36: RateDependentPlastic
+                if (mat_type == "RateDependentPlastic") {
+                    Component::RateDependentPlasticParams rdp{};
+                    if (cons.contains("HardeningMode")) rdp.hardening_mode = cons["HardeningMode"].get<double>();
+                    if (cons.contains("FailurePlasticStrain")) rdp.failure_plastic_strain = cons["FailurePlasticStrain"].get<double>();
+                    if (cons.contains("FailBeginTensileStrain")) rdp.fail_begin_tensile_strain = cons["FailBeginTensileStrain"].get<double>();
+                    if (cons.contains("FailEndTensileStrain")) rdp.fail_end_tensile_strain = cons["FailEndTensileStrain"].get<double>();
+                    if (cons.contains("ElemDelTensileStrain")) rdp.elem_del_tensile_strain = cons["ElemDelTensileStrain"].get<double>();
+                    if (cons.contains("StrainRateType")) rdp.strain_rate_type = cons["StrainRateType"].get<std::string>();
+                    if (cons.contains("StrainAndStrainRateYieldCurve") && cons["StrainAndStrainRateYieldCurve"].is_array()) {
+                        rdp.yield_curves = cons["StrainAndStrainRateYieldCurve"].get<std::vector<std::string>>();
+                    }
+                    if (cons.contains("StrainRate") && cons["StrainRate"].is_array()) {
+                        rdp.strain_rates = cons["StrainRate"].get<std::vector<double>>();
+                    }
+                    registry.emplace<Component::RateDependentPlasticParams>(mat_e, std::move(rdp));
+                }
+
+                // -----------------------------------------------------------------
+                // 超弹性材料 (Polynomial / ReducedPolynomial / Ogden*)
+                // 解析顺序：
+                //  1) 直接参数 -> PolynomialParams / ReducedPolynomialParams / OgdenParams
+                //  2) 实验曲线 TestCurve-* -> HyperelasticMode::*_funcs (存 Curve 实体)
+                // -----------------------------------------------------------------
+                auto map_curve_names_to_entities = [&](const char* json_key, std::vector<entt::entity>& out_entities) {
+                    if (!cons.contains(json_key) || !cons[json_key].is_array()) return;
+                    for (const auto& name_val : cons[json_key]) {
+                        if (!name_val.is_string()) continue;
+                        const std::string name = name_val.get<std::string>();
+                        entt::entity curve_e = get_or_create_curve_entity_by_name(name);
+                        out_entities.push_back(curve_e);
+                    }
+                };
+
+                Component::HyperelasticMode hyper{};
+                bool has_hyperelastic = false;
+
+                // --- Polynomial (full) ---
+                if (mat_type == "Polynomial") {
+                    // 直接参数模式
+                    if (cons.contains("Order") && cons.contains("Const") && cons["Const"].is_array()) {
+                        const int order = cons["Order"].get<int>();
+                        std::vector<double> all;
+                        all.reserve(cons["Const"].size());
+                        for (const auto& v : cons["Const"]) {
+                            if (v.is_number()) all.push_back(v.get<double>());
+                        }
+
+                        if (order > 0 && static_cast<int>(all.size()) >= order) {
+                            const int total = static_cast<int>(all.size());
+                            const int d_count = order;
+                            const int c_count = total - d_count;
+
+                            Component::PolynomialParams poly{};
+                            poly.c_ij.assign(all.begin(), all.begin() + c_count);
+                            poly.d_i.assign(all.begin() + c_count, all.end());
+
+                            registry.emplace<Component::PolynomialParams>(mat_e, std::move(poly));
+
+                            hyper.order = order;
+                            hyper.fit_from_data = false;
+                            hyper.nu = params.nu;
+                            has_hyperelastic = true;
+                        }
+                    }
+                }
+
+                // --- ReducedPolynomial ---
+                if (mat_type == "ReducedPolynomial") {
+                    if (cons.contains("Order") && cons.contains("Const") && cons["Const"].is_array()) {
+                        const int order = cons["Order"].get<int>();
+                        std::vector<double> all;
+                        all.reserve(cons["Const"].size());
+                        for (const auto& v : cons["Const"]) {
+                            if (v.is_number()) all.push_back(v.get<double>());
+                        }
+
+                        if (order > 0 && static_cast<int>(all.size()) == 2 * order) {
+                            Component::ReducedPolynomialParams rpoly{};
+                            rpoly.c_i0.assign(all.begin(), all.begin() + order);
+                            rpoly.d_i.assign(all.begin() + order, all.end());
+
+                            registry.emplace<Component::ReducedPolynomialParams>(mat_e, std::move(rpoly));
+
+                            hyper.order = order;
+                            hyper.fit_from_data = false;
+                            // ReducedPolynomial 的泊松比可能来自上层字段
+                            hyper.nu = params.nu;
+                            has_hyperelastic = true;
+                        }
+                    }
+                }
+
+                // --- Ogden family (OgdenRubber / Ogden2 / Ogden) ---
+                if (mat_type == "OgdenRubber" || mat_type == "Ogden2" || mat_type == "Ogden") {
+                    Component::OgdenParams og{};
+
+                    if (cons.contains("Mu") && cons["Mu"].is_array()) {
+                        for (const auto& v : cons["Mu"]) {
+                            if (v.is_number()) og.mu_i.push_back(v.get<double>());
+                        }
+                    }
+                    if (cons.contains("Alpha") && cons["Alpha"].is_array()) {
+                        for (const auto& v : cons["Alpha"]) {
+                            if (v.is_number()) og.alpha_i.push_back(v.get<double>());
+                        }
+                    }
+                    if (cons.contains("D") && cons["D"].is_array()) {
+                        for (const auto& v : cons["D"]) {
+                            if (v.is_number()) og.d_i.push_back(v.get<double>());
+                        }
+                    }
+
+                    if (!og.mu_i.empty() && og.mu_i.size() == og.alpha_i.size()) {
+                        registry.emplace<Component::OgdenParams>(mat_e, std::move(og));
+
+                        hyper.order = static_cast<int>(og.mu_i.size());
+                        hyper.fit_from_data = false;
+                        // OgdenRubber 与 Ogden2/HyperFoam2 一般都使用 PoissonRatio
+                        hyper.nu = params.nu;
+                        has_hyperelastic = true;
+                    } else if (!og.mu_i.empty() || !og.alpha_i.empty()) {
+                        spdlog::warn("Ogden material '{}' has inconsistent Mu/Alpha lengths. Ignoring direct parameters.", key);
+                    }
+                }
+
+                // --- 实验曲线模式 (TestCurve-*)，适用于 Polynomial / ReducedPolynomial / Ogden* / MooneyRivlin / Yeoh 等 ---
+                bool has_curve = false;
+                if (cons.contains("TestCurve-Uniaxial") || cons.contains("TestCurve-Biaxial") ||
+                    cons.contains("TestCurve-Planar")   || cons.contains("TestCurve-Volumetric")) {
+                    has_curve = true;
+                }
+
+                if (has_curve) {
+                    hyper.fit_from_data = true;
+
+                    // 阶数: Ogden2/Polynomial/HyperFoam 系的 CurveFit_n，缺省为 1
+                    if (cons.contains("CurveFit_n") && cons["CurveFit_n"].is_number_integer()) {
+                        hyper.order = cons["CurveFit_n"].get<int>();
+                    } else if (hyper.order <= 0) {
+                        hyper.order = 1;
+                    }
+
+                    // 泊松比：HyperFoam2 等有 CurveFit_Nu，其它退化为 PoissonRatio / 线弹性 nu
+                    if (cons.contains("CurveFit_Nu") && cons["CurveFit_Nu"].is_number()) {
+                        hyper.nu = cons["CurveFit_Nu"].get<double>();
+                    } else if (cons.contains("PoissonRatio") && cons["PoissonRatio"].is_number()) {
+                        hyper.nu = cons["PoissonRatio"].get<double>();
+                    } else {
+                        hyper.nu = params.nu;
+                    }
+
+                    map_curve_names_to_entities("TestCurve-Uniaxial",   hyper.uniaxial_funcs);
+                    map_curve_names_to_entities("TestCurve-Biaxial",    hyper.biaxial_funcs);
+                    map_curve_names_to_entities("TestCurve-Planar",     hyper.planar_funcs);
+                    map_curve_names_to_entities("TestCurve-Volumetric", hyper.volumetric_funcs);
+
+                    has_hyperelastic = true;
+                }
+
+                if (has_hyperelastic) {
+                    registry.emplace<Component::HyperelasticMode>(mat_e, std::move(hyper));
+                }
+            } else {
+                // Still store density-only materials to keep linkage stable.
+                if (val.contains("Density")) {
+                    registry.emplace<Component::LinearElasticParams>(mat_e, params);
+                }
             }
             registry.emplace<Component::SetName>(mat_e, key);
         }
@@ -481,6 +760,8 @@ void SimdroidParser::parse_rigid_bodies(const json& j_rbs, entt::registry& regis
 }
 
 void SimdroidParser::parse_loads(const json& j_loads, entt::registry& registry) {
+    DofMap* dof_map = registry.ctx().contains<DofMap>() ? &registry.ctx().get<DofMap>() : nullptr;
+
     int next_load_id = 1;
     for (auto& [key, val] : j_loads.items()) {
         std::string type = val.value("Type", "");
@@ -497,60 +778,88 @@ void SimdroidParser::parse_loads(const json& j_loads, entt::registry& registry) 
                 continue;
             }
 
-            double mag = val.value("Magnitude", 0.0);
-            if (val.contains("Mag")) mag = val["Mag"].get<double>();
-            const bool has_mag = val.contains("Magnitude") || val.contains("Mag");
-
-            double fx = 0.0, fy = 0.0, fz = 0.0;
-
-            if (val.contains("Direction") && val["Direction"].is_array()) {
-                const auto& d = val["Direction"];
-                if (d.size() >= 3) {
-                    double dx = d[0].get<double>();
-                    double dy = d[1].get<double>();
-                    double dz = d[2].get<double>();
-                    std::tie(dx, dy, dz) = normalize(dx, dy, dz);
-                    fx = mag * dx;
-                    fy = mag * dy;
-                    fz = mag * dz;
-                }
-            } else {
-                const double x = val.value("X", 0.0);
-                const double y = val.value("Y", 0.0);
-                const double z = val.value("Z", 0.0);
-
-                // If Magnitude is provided, treat X/Y/Z as direction components; otherwise treat them as direct components.
-                if (has_mag && std::abs(mag) > 0.0) {
-                    double dx = x, dy = y, dz = z;
-                    std::tie(dx, dy, dz) = normalize(dx, dy, dz);
-                    fx = mag * dx;
-                    fy = mag * dy;
-                    fz = mag * dz;
-                } else {
-                    fx = x;
-                    fy = y;
-                    fz = z;
-                }
-            }
-
+            const bool is_moment = (type == "Moment");
             struct LoadComp { std::string axis; double val; };
             std::vector<LoadComp> components;
 
-            const bool is_moment = (type == "Moment");
-            const char* ax_x = is_moment ? "rx" : "x";
-            const char* ax_y = is_moment ? "ry" : "y";
-            const char* ax_z = is_moment ? "rz" : "z";
+            // Simdroid 格式：Dof + Value（单分量），与 Material 的 Function 类似可带 TimeCurve
+            if (val.contains("Dof")) {
+                std::string dof_str = to_lower_copy(val["Dof"].get<std::string>());
+                double value = val.value("Value", val.value("Magnitude", 0.0));
+                if (val.contains("Mag")) value = val["Mag"].get<double>();
+                if (is_moment && dof_str.size() == 1) {
+                    if (dof_str == "x") dof_str = "rx";
+                    else if (dof_str == "y") dof_str = "ry";
+                    else if (dof_str == "z") dof_str = "rz";
+                }
+                if (std::abs(value) > 1e-12) components.push_back({dof_str, value});
+            } else {
+                double mag = val.value("Magnitude", 0.0);
+                if (val.contains("Mag")) mag = val["Mag"].get<double>();
+                const bool has_mag = val.contains("Magnitude") || val.contains("Mag");
 
-            if (std::abs(fx) > 1e-12) components.push_back({ax_x, fx});
-            if (std::abs(fy) > 1e-12) components.push_back({ax_y, fy});
-            if (std::abs(fz) > 1e-12) components.push_back({ax_z, fz});
+                double fx = 0.0, fy = 0.0, fz = 0.0;
+
+                if (val.contains("Direction") && val["Direction"].is_array()) {
+                    const auto& d = val["Direction"];
+                    if (d.size() >= 3) {
+                        double dx = d[0].get<double>();
+                        double dy = d[1].get<double>();
+                        double dz = d[2].get<double>();
+                        std::tie(dx, dy, dz) = normalize(dx, dy, dz);
+                        fx = mag * dx;
+                        fy = mag * dy;
+                        fz = mag * dz;
+                    }
+                } else {
+                    const double x = val.value("X", 0.0);
+                    const double y = val.value("Y", 0.0);
+                    const double z = val.value("Z", 0.0);
+
+                    if (has_mag && std::abs(mag) > 0.0) {
+                        double dx = x, dy = y, dz = z;
+                        std::tie(dx, dy, dz) = normalize(dx, dy, dz);
+                        fx = mag * dx;
+                        fy = mag * dy;
+                        fz = mag * dz;
+                    } else {
+                        fx = x;
+                        fy = y;
+                        fz = z;
+                    }
+                }
+
+                const char* ax_x = is_moment ? "rx" : "x";
+                const char* ax_y = is_moment ? "ry" : "y";
+                const char* ax_z = is_moment ? "rz" : "z";
+                if (std::abs(fx) > 1e-12) components.push_back({ax_x, fx});
+                if (std::abs(fy) > 1e-12) components.push_back({ax_y, fy});
+                if (std::abs(fz) > 1e-12) components.push_back({ax_z, fz});
+            }
+
+            if (components.empty()) continue;
 
             const auto& node_members = registry.get<Component::NodeSetMembers>(set_entity).members;
+
+            // TimeCurve：从 ctx 中的 curve 名->实体映射解析（与 Material 的 Function 预解析一致）
+            entt::entity curve_entity = entt::null;
+            if (dof_map && val.contains("TimeCurve") && val["TimeCurve"].is_string()) {
+                std::string curve_name = val["TimeCurve"].get<std::string>();
+                trim(curve_name);
+                if (!curve_name.empty()) {
+                    auto it = dof_map->curve_name_to_entity.find(curve_name);
+                    if (it != dof_map->curve_name_to_entity.end() && registry.valid(it->second)) {
+                        curve_entity = it->second;
+                    } else {
+                        spdlog::warn("Load '{}' TimeCurve '{}' not found in Function.", key, curve_name);
+                    }
+                }
+            }
 
             for (const auto& comp : components) {
                 auto load_def_entity = registry.create();
                 registry.emplace<Component::LoadID>(load_def_entity, next_load_id++);
-                registry.emplace<Component::NodalLoad>(load_def_entity, is_moment ? 2 : 1, comp.axis, comp.val);
+                registry.emplace<Component::NodalLoad>(load_def_entity, is_moment ? 2 : 1, comp.axis, comp.val, curve_entity);
                 registry.emplace<Component::SetName>(load_def_entity, key);
 
                 for (auto node_entity : node_members) {

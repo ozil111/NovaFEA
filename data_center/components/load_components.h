@@ -49,15 +49,17 @@ namespace Component {
      * @brief [新] 附加到 Load 实体，存储节点载荷的定义
      * @details 对应 JSON 中的 "load" 对象
      * 一个 Load 实体代表一个抽象的载荷定义，可以被应用到多个节点上
+     * curve_entity 非 null 时，载荷值将按该曲线随时间缩放。
      */
     struct NodalLoad {
-        int type_id;        // 载荷类型 ID
-        std::string dof;    // 自由度："all", "x", "y", "z", "xy" 等
-        double value;       // 载荷值
+        int type_id;           // 载荷类型 ID
+        std::string dof;       // 自由度："all", "x", "y", "z", "xy" 等
+        double value;          // 载荷值
+        entt::entity curve_entity = entt::null;  // 可选时间曲线实体，entt::null 表示不缩放
     };
 
     /**
-     * @brief [新] 附加到 Load 实体，指向关联的 Curve 实体（可选）
+     * @brief [已弃用] 请使用 NodalLoad::curve_entity。保留仅为兼容旧数据。
      * @details 如果存在，载荷值会根据curve和时间进行缩放
      */
     struct CurveRef {

@@ -7,6 +7,7 @@
 #include "../../data_center/components/simdroid_components.h"
 #include "../../data_center/components/analysis_component.h"
 #include "../../data_center/TopologyData.h"
+#include "../../data_center/DofMap.h"
 #include "spdlog/spdlog.h"
 #include <fstream>
 #include <sstream>
@@ -784,12 +785,160 @@ void SimdroidExporter::save_control_json(const std::string& path, DataContext& c
         
         // 更新我们关心的参数
         mat_node["Density"] = params.rho;
-        mat_node["MaterialConstants"]["E"] = params.E;
-        mat_node["MaterialConstants"]["Nu"] = params.nu;
-        
-        // 注意：如果蓝图里原本有 "Type": "Elastic"，它会被保留。
-        // 如果是新建的，可能需要补充 "Type"
-        if (!mat_node.contains("Type")) mat_node["Type"] = "Elastic";
+
+        auto& cons = mat_node["MaterialConstants"];
+
+        // Preserve original key style when possible (ElasticModulus/PoissonRatio vs E/Nu)
+        if (cons.contains("ElasticModulus")) cons["ElasticModulus"] = params.E;
+        if (cons.contains("E")) cons["E"] = params.E;
+        if (!cons.contains("ElasticModulus") && !cons.contains("E")) cons["ElasticModulus"] = params.E;
+
+        if (cons.contains("PoissonRatio")) cons["PoissonRatio"] = params.nu;
+        if (cons.contains("Nu")) cons["Nu"] = params.nu;
+        if (!cons.contains("PoissonRatio") && !cons.contains("Nu")) cons["PoissonRatio"] = params.nu;
+
+        // Material model type: prefer ECS value; fallback to existing blueprint fields.
+        std::string mat_type;
+        if (registry.all_of<Component::MaterialModel>(entity)) {
+            mat_type = registry.get<Component::MaterialModel>(entity).value;
+            mat_node["MaterialType"] = mat_type;
+        } else {
+            if (!mat_node.contains("MaterialType") && mat_node.contains("Type")) {
+                mat_type = mat_node["Type"].is_string() ? mat_node["Type"].get<std::string>() : std::string{};
+                mat_node["MaterialType"] = mat_type;
+            } else if (mat_node.contains("MaterialType") && mat_node["MaterialType"].is_string()) {
+                mat_type = mat_node["MaterialType"].get<std::string>();
+            }
+            if (mat_type.empty()) {
+                mat_type = "IsotropicElastic";
+                mat_node["MaterialType"] = mat_type;
+            }
+        }
+
+        // LAW2: IsotropicPlasticJC
+        if (registry.all_of<Component::IsotropicPlasticParams>(entity)) {
+            const auto& pl = registry.get<Component::IsotropicPlasticParams>(entity);
+            cons["YieldStress"] = pl.yield_stress_A;
+            cons["HardeningCoefB"] = pl.hardening_coef_B;
+            cons["HardeningExpN"] = pl.hardening_exp_n;
+            cons["RateCoef"] = pl.rate_coef_C;
+            cons["HardeningMode"] = pl.hardening_mode;
+            cons["TemperatureExp"] = pl.temperature_exp_m;
+            cons["MeltTemperature"] = pl.melt_temperature;
+            cons["EnvTemperature"] = pl.env_temperature;
+            cons["RefStrainRate"] = pl.ref_strain_rate;
+            cons["SpecificHeat"] = pl.specific_heat;
+
+            // Ensure type matches when plastic component exists
+            if (!mat_node.contains("MaterialType") || !mat_node["MaterialType"].is_string() || mat_node["MaterialType"].get<std::string>().empty()) {
+                mat_type = "IsotropicPlasticJC";
+                mat_node["MaterialType"] = mat_type;
+            }
+        }
+
+        // LAW36: RateDependentPlastic
+        if (registry.all_of<Component::RateDependentPlasticParams>(entity)) {
+            const auto& rdp = registry.get<Component::RateDependentPlasticParams>(entity);
+            cons["HardeningMode"] = rdp.hardening_mode;
+            cons["FailurePlasticStrain"] = rdp.failure_plastic_strain;
+            cons["FailBeginTensileStrain"] = rdp.fail_begin_tensile_strain;
+            cons["FailEndTensileStrain"] = rdp.fail_end_tensile_strain;
+            cons["ElemDelTensileStrain"] = rdp.elem_del_tensile_strain;
+            if (!rdp.strain_rate_type.empty()) cons["StrainRateType"] = rdp.strain_rate_type;
+            if (!rdp.yield_curves.empty()) cons["StrainAndStrainRateYieldCurve"] = rdp.yield_curves;
+            if (!rdp.strain_rates.empty()) cons["StrainRate"] = rdp.strain_rates;
+
+            // Ensure type matches when plastic component exists
+            if (!mat_node.contains("MaterialType") || !mat_node["MaterialType"].is_string() || mat_node["MaterialType"].get<std::string>().empty()) {
+                mat_type = "RateDependentPlastic";
+                mat_node["MaterialType"] = mat_type;
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // 超弹性材料同步：
+        //  - 直接参数：PolynomialParams / ReducedPolynomialParams / OgdenParams
+        //  - 曲线模式：HyperelasticMode + DofMap 中的 curve 映射
+        // ------------------------------------------------------------------
+        if (registry.all_of<Component::HyperelasticMode>(entity)) {
+            const auto& hyper = registry.get<Component::HyperelasticMode>(entity);
+
+            const DofMap* dof_map = nullptr;
+            if (registry.ctx().contains<DofMap>()) {
+                dof_map = &registry.ctx().get<DofMap>();
+            }
+
+            auto write_curve_entities = [&](const std::vector<entt::entity>& curves, const char* key) {
+                if (curves.empty() || !dof_map) return;
+                nlohmann::json arr = nlohmann::json::array();
+                for (auto ce : curves) {
+                    auto it = dof_map->curve_entity_to_name.find(ce);
+                    if (it == dof_map->curve_entity_to_name.end()) continue;
+                    arr.push_back(it->second);
+                }
+                if (!arr.empty()) cons[key] = std::move(arr);
+            };
+
+            // 曲线拟合模式
+            if (hyper.fit_from_data) {
+                if (hyper.order > 0) {
+                    cons["CurveFit_n"] = hyper.order;
+                }
+                // 仅在有意义时写回泊松比；对于 Ogden2/HyperFoam2 等，这将对应 CurveFit_Nu
+                if (std::abs(hyper.nu) > 0.0) {
+                    if (mat_type == "HyperFoam2" || mat_type == "HyperFoam" || mat_type == "Ogden2") {
+                        cons["CurveFit_Nu"] = hyper.nu;
+                    } else {
+                        // 其它材料保持 PoissonRatio 为主，不强行覆盖
+                        if (cons.contains("PoissonRatio")) {
+                            cons["PoissonRatio"] = hyper.nu;
+                        }
+                    }
+                }
+
+                write_curve_entities(hyper.uniaxial_funcs,   "TestCurve-Uniaxial");
+                write_curve_entities(hyper.biaxial_funcs,    "TestCurve-Biaxial");
+                write_curve_entities(hyper.planar_funcs,     "TestCurve-Planar");
+                write_curve_entities(hyper.volumetric_funcs, "TestCurve-Volumetric");
+            } else {
+                // 直接参数模式
+                if (mat_type == "Polynomial" && registry.all_of<Component::PolynomialParams>(entity)) {
+                    const auto& poly = registry.get<Component::PolynomialParams>(entity);
+                    const int order = static_cast<int>(poly.d_i.size());
+                    if (order > 0) {
+                        cons["Order"] = order;
+                        std::vector<double> all;
+                        all.reserve(poly.c_ij.size() + poly.d_i.size());
+                        all.insert(all.end(), poly.c_ij.begin(), poly.c_ij.end());
+                        all.insert(all.end(), poly.d_i.begin(), poly.d_i.end());
+                        cons["Const"] = all;
+                    }
+                } else if (mat_type == "ReducedPolynomial" && registry.all_of<Component::ReducedPolynomialParams>(entity)) {
+                    const auto& rpoly = registry.get<Component::ReducedPolynomialParams>(entity);
+                    const int order = static_cast<int>(rpoly.d_i.size());
+                    if (order > 0 && static_cast<int>(rpoly.c_i0.size()) == order) {
+                        cons["Order"] = order;
+                        std::vector<double> all;
+                        all.reserve(rpoly.c_i0.size() + rpoly.d_i.size());
+                        all.insert(all.end(), rpoly.c_i0.begin(), rpoly.c_i0.end());
+                        all.insert(all.end(), rpoly.d_i.begin(), rpoly.d_i.end());
+                        cons["Const"] = all;
+                    }
+                } else if ((mat_type == "OgdenRubber" || mat_type == "Ogden2" || mat_type == "Ogden") &&
+                           registry.all_of<Component::OgdenParams>(entity)) {
+                    const auto& og = registry.get<Component::OgdenParams>(entity);
+                    if (!og.mu_i.empty() && og.mu_i.size() == og.alpha_i.size()) {
+                        cons["Mu"] = og.mu_i;
+                        cons["Alpha"] = og.alpha_i;
+                        if (!og.d_i.empty()) {
+                            cons["D"] = og.d_i;
+                        }
+                        // 泊松比依然从线弹性部分同步
+                        cons["PoissonRatio"] = params.nu;
+                    }
+                }
+            }
+        }
     }
 
     // --- Sync Analysis Settings ---
