@@ -59,9 +59,21 @@ public:
             if (node.is_load_part) { color = "#ffcccc"; borderColor = "#ff0000"; }
             else if (node.is_constraint_part) { color = "#e6ccff"; borderColor = "#800080"; }
 
+            std::string tooltip;
+            if (!node.material_info.empty()) {
+                tooltip += "Material: " + node.material_info;
+            }
+            if (!node.property_info.empty()) {
+                if (!tooltip.empty()) tooltip += "\\n";
+                tooltip += "Property: " + node.property_info;
+            }
+
             file << "            { id: \"" << sanitize_id(name) << "\", label: \"" << name << "\", "
                  << "color: { background: '" << color << "', border: '" << borderColor << "' }, "
-                 << "borderWidth: 2 }";
+                 << "borderWidth: 2, "
+                 << "title: '" << js_escape(tooltip.empty() ? name : tooltip) << "', "
+                 << "materialInfo: '" << js_escape(node.material_info) << "', "
+                 << "propertyInfo: '" << js_escape(node.property_info) << "' }";
             first = false;
         }
 
@@ -116,6 +128,24 @@ public:
             interaction: { hover: true, navigationButtons: true, keyboard: true }
         };
         var network = new vis.Network(container, data, options);
+
+        // 点击节点时显示材料和属性信息
+        network.on('click', function (params) {
+            if (params.nodes.length === 0) return;
+            var nodeId = params.nodes[0];
+            var node = nodes.get(nodeId);
+            if (!node) return;
+
+            var lines = [];
+            lines.push('Part: ' + node.label);
+            if (node.materialInfo) {
+                lines.push('Material: ' + node.materialInfo);
+            }
+            if (node.propertyInfo) {
+                lines.push('Property: ' + node.propertyInfo);
+            }
+            alert(lines.join('\\n'));
+        });
     </script>
 </body>
 </html>
@@ -129,6 +159,19 @@ private:
         std::string out = name;
         for (char& c : out) if (!isalnum(c)) c = '_';
         if (isdigit(out[0])) out = "P_" + out;
+        return out;
+    }
+    
+    static std::string js_escape(const std::string& input) {
+        std::string out;
+        out.reserve(input.size());
+        for (char c : input) {
+            if (c == '\\\\') out += "\\\\";
+            else if (c == '\'') out += "\\'";
+            else if (c == '\n') out += "\\n";
+            else if (c == '\r') { /* skip */ }
+            else out += c;
+        }
         return out;
     }
 };

@@ -31,6 +31,9 @@ struct PartNode {
     std::string name;
     bool is_load_part = false;
     bool is_constraint_part = false;
+    // 用于在可视化中显示的材料/属性信息
+    std::string material_info;
+    std::string property_info;
     std::vector<EdgeInfo> edges;
 };
 

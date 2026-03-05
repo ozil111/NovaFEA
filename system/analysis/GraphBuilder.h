@@ -11,6 +11,8 @@
 #include "../simdroid/SimdroidInspector.h"
 #include "../../data_center/components/simdroid_components.h"
 #include "../../data_center/components/load_components.h"
+#include "../../data_center/components/material_components.h"
+#include "../../data_center/components/property_components.h"
 #include <set>
 #include <map>
 #include <algorithm>
@@ -34,6 +36,18 @@ public:
         for (auto entity : view_parts) {
             const auto& part = view_parts.get<const Component::SimdroidPart>(entity);
             graph.add_node(part.name);
+            auto& node = graph.nodes[part.name];
+
+            // 获取材料信息 (例如: IsotropicElastic)
+            if (registry.valid(part.material) && registry.all_of<Component::MaterialModel>(part.material)) {
+                node.material_info = registry.get<Component::MaterialModel>(part.material).value;
+            }
+
+            // 获取属性信息 (例如: SolidProperty typeid: 1, HG: eas)
+            if (registry.valid(part.section) && registry.all_of<Component::SolidProperty>(part.section)) {
+                const auto& prop = registry.get<Component::SolidProperty>(part.section);
+                node.property_info = "Type: " + std::to_string(prop.type_id) + ", HG: " + prop.hourglass_control;
+            }
         }
 
         // -------------------------------------------------------
