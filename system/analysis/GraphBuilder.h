@@ -10,9 +10,14 @@
 #include "entt/entt.hpp"
 #include "../simdroid/SimdroidInspector.h"
 #include "../../data_center/components/simdroid_components.h"
+#include "../../data_center/components/load_components.h"
 #include <set>
 #include <map>
 #include <algorithm>
+
+namespace Component {
+    struct NodeID;
+}
 
 class GraphBuilder {
 public:
@@ -125,6 +130,47 @@ public:
             
             graph.add_edge(pair.first, pair.second, ConnectionType::SharedNode, weight, count);
             graph.add_edge(pair.second, pair.first, ConnectionType::SharedNode, weight, count);
+        }
+
+        // -------------------------------------------------------
+        // 4. 标记 Load / Constraint 所属的 Part
+        //    通过节点 -> 元素 -> Part 的映射，将有载荷/约束的节点
+        //    归属到对应 PartNode 上。
+        // -------------------------------------------------------
+        {
+            // 4.1 处理 Nodal Load -> is_load_part
+            auto view_node_load = registry.view<const Component::AppliedLoadRef, const Component::NodeID>();
+            for (auto entity : view_node_load) {
+                const int nid = view_node_load.get<const Component::NodeID>(entity).value;
+                auto it_ne = inspector.nid_to_elems.find(nid);
+                if (it_ne == inspector.nid_to_elems.end()) continue;
+
+                for (int eid : it_ne->second) {
+                    auto it_part = inspector.eid_to_part.find(eid);
+                    if (it_part == inspector.eid_to_part.end()) continue;
+                    auto node_it = graph.nodes.find(it_part->second);
+                    if (node_it != graph.nodes.end()) {
+                        node_it->second.is_load_part = true;
+                    }
+                }
+            }
+
+            // 4.2 处理 Boundary 条件 -> is_constraint_part
+            auto view_node_fix = registry.view<const Component::AppliedBoundaryRef, const Component::NodeID>();
+            for (auto entity : view_node_fix) {
+                const int nid = view_node_fix.get<const Component::NodeID>(entity).value;
+                auto it_ne = inspector.nid_to_elems.find(nid);
+                if (it_ne == inspector.nid_to_elems.end()) continue;
+
+                for (int eid : it_ne->second) {
+                    auto it_part = inspector.eid_to_part.find(eid);
+                    if (it_part == inspector.eid_to_part.end()) continue;
+                    auto node_it = graph.nodes.find(it_part->second);
+                    if (node_it != graph.nodes.end()) {
+                        node_it->second.is_constraint_part = true;
+                    }
+                }
+            }
         }
 
         return graph;

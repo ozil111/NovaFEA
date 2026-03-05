@@ -1,9 +1,7 @@
 /**
- * This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. 
- * If a copy of the MPL was not distributed with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
- *
  * Copyright (c) 2025 hyperFEM. All rights reserved.
- * Author: Xiaotong Wang (or hyperFEM Team)
+ * Author: Xiaotong Wang
+ * 基于 Vis.js 的高性能拓扑报告生成器
  */
 #pragma once
 #include "PartGraph.h"
@@ -11,182 +9,125 @@
 #include <fstream>
 #include <sstream>
 #include <unordered_set>
-#include <cctype>
 
 class MermaidReporter {
 public:
     static void generate_interactive_html(const PartGraph& graph, const std::string& output_path) {
-        // 先进行分析，把图拆解
         auto analysis = GraphAnalyzer::analyze(graph);
-
         std::ofstream file(output_path);
         if (!file.is_open()) return;
 
-        // 写入 HTML 头部，引入 svg-pan-zoom 库
+        // 写入 HTML 头部和 Vis.js CDN
         file << R"HTML(
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Structure Analysis</title>
-    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+    <title>hyperFEM Structure Analysis</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <style>
-        body, html { height: 100%; margin: 0; overflow: hidden; font-family: sans-serif; }
-        #container { height: 100%; width: 100%; border: 1px solid #ccc; background-color: #fafafa; }
-        .controls { position: absolute; top: 10px; right: 10px; z-index: 100; background: white; padding: 10px; border: 1px solid #ccc; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+        body, html { height: 100%; margin: 0; overflow: hidden; background-color: #f4f4f9; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        #network-container { height: 100vh; width: 100vw; }
+        .legend { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(255,255,255,0.9); padding: 15px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); border: 1px solid #ddd; }
+        .legend-item { margin: 5px 0; display: flex; align-items: center; font-size: 12px; }
+        .color-box { width: 15px; height: 15px; margin-right: 10px; border-radius: 3px; }
     </style>
 </head>
 <body>
-    <div class="controls">
-        <h3>Graph Controls</h3>
-        <p>Scroll to Zoom, Drag to Pan</p>
-        <button onclick="resetZoom()">Reset View</button>
+    <div class="legend">
+        <strong>hyperFEM 结构图例</strong>
+        <div class="legend-item"><div class="color-box" style="background:#ffcccc; border:1px solid #ff0000;"></div> 载荷节点 (Load)</div>
+        <div class="legend-item"><div class="color-box" style="background:#e6ccff; border:1px solid #800080;"></div> 约束节点 (Fix)</div>
+        <div class="legend-item"><div class="color-box" style="background:#d2e5ff; border:1px solid #2b7ce9;"></div> 普通组件 (Normal)</div>
+        <hr/>
+        <div class="legend-item">● 粗线: Tie 连接</div>
+        <div class="legend-item">○ 虚线: Shared Nodes</div>
     </div>
-    <div id="container" class="mermaid">
-graph LR
-    %% 全局样式 - 节点
-    classDef load fill:#ffcccc,stroke:#ff0000,stroke-width:3px;
-    classDef fix fill:#e6ccff,stroke:#800080,stroke-width:3px;
-    classDef normal fill:#f9f9f9,stroke:#333,stroke-width:1px;
-    classDef critical stroke:#ff0000,stroke-width:2px,stroke-dasharray: 5 5;
+    <div id="network-container"></div>
 
-    %% 连接类型色彩 (用于图例 / 一致配色)
-    classDef tieConn stroke:#e67e22,stroke-width:4px;
-    classDef contactConn stroke:#2980b9,stroke-width:2px;
-    classDef sharedConn stroke:#7f8c8d,stroke-width:2px,stroke-dasharray: 5 5;
-        )HTML";
+    <script type="text/javascript">
+        var nodes = new vis.DataSet([
+)HTML";
 
-        // --- 生成 Mermaid 内容 ---
-        
-        std::unordered_set<std::string> drawn_nodes;
-
-        // 1. 优先绘制“主传力系统” (包含 Load/Constraint 的组)
-        int cluster_id = 0;
-        for (const auto& component : analysis.components) {
-            bool is_main_system = GraphAnalyzer::has_load_or_fix(graph, component);
+        // 1. 生成节点数据 (JSON 格式)
+        bool first = true;
+        for (const auto& [name, node] : graph.nodes) {
+            if (!first) file << ",\n";
+            std::string color = "#d2e5ff";
+            std::string borderColor = "#2b7ce9";
             
-            // 如果是孤立的小零件（少于3个且不重要），可以选择忽略，或者放入"碎片"篮子
-            if (!is_main_system && component.size() < 2) continue;
+            if (node.is_load_part) { color = "#ffcccc"; borderColor = "#ff0000"; }
+            else if (node.is_constraint_part) { color = "#e6ccff"; borderColor = "#800080"; }
 
-            file << "\n    subgraph Cluster_" << cluster_id++ << " [" << (is_main_system ? "Main Force Path" : "Isolated Assembly") << "]\n";
-            file << "    direction TB\n"; // 子图内部从上到下，整体从左到右
-
-            for (const auto& node_name : component) {
-                const auto& node = graph.nodes.at(node_name);
-                std::string id = sanitize_id(node_name);
-                
-                // 节点定义
-                file << "    " << id << "[\"" << node_name << "\"]\n";
-                
-                // 样式应用
-                if (node.is_load_part) file << "    class " << id << " load;\n";
-                else if (node.is_constraint_part) file << "    class " << id << " fix;\n";
-                else file << "    class " << id << " normal;\n";
-
-                drawn_nodes.insert(node_name);
-            }
-            file << "    end\n"; // End subgraph
+            file << "            { id: \"" << sanitize_id(name) << "\", label: \"" << name << "\", "
+                 << "color: { background: '" << color << "', border: '" << borderColor << "' }, "
+                 << "borderWidth: 2 }";
+            first = false;
         }
 
-        // 2. 绘制边 (Edges)
-        // 注意：只绘制两个端点都已经被画出来的边，避免引用不存在的节点导致 mermaid 崩溃
-        for (const auto& [name, node] : graph.nodes) {
-            if (drawn_nodes.find(name) == drawn_nodes.end()) continue;
+        file << R"HTML(
+        ]);
 
+        var edges = new vis.DataSet([
+)HTML";
+
+        // 2. 生成边数据
+        first = true;
+        for (const auto& [name, node] : graph.nodes) {
             std::string src_id = sanitize_id(name);
             for (const auto& edge : node.edges) {
-                if (drawn_nodes.find(edge.target_part) == drawn_nodes.end()) continue;
-
                 std::string tgt_id = sanitize_id(edge.target_part);
-                if (src_id >= tgt_id) continue; // 去重，只画单向
+                if (src_id >= tgt_id) continue;
 
-                file << "    " << src_id;
+                if (!first) file << ",\n";
+                file << "            { from: \"" << src_id << "\", to: \"" << tgt_id << "\", ";
 
-                // 根据连接类型使用不同的 Mermaid 语法与标签
-                switch (edge.type) {
-                    case ConnectionType::Contact: {
-                        // Tie 连接：使用最粗实线表现（Mermaid 中使用粗线 ===，并在标签中标明 Tie）
-                        if (edge.sub_type == "Tie") {
-                            file << " ===|\"Tie\"| ";
-                        } else {
-                            // 普通接触：使用双线 === 并标注具体类型，例如 Contact (Type7)
-                            std::string label = edge.sub_type.empty() ? "Contact" : "Contact (" + edge.sub_type + ")";
-                            file << " ===|\"" << label << "\"| ";
-                        }
-                        break;
+                // 根据连接类型设置样式
+                if (edge.type == ConnectionType::Contact) {
+                    if (edge.sub_type == "Tie") {
+                        file << "label: 'Tie', width: 4, color: '#e67e22'";
+                    } else {
+                        file << "label: 'Contact', width: 2, color: '#2980b9'";
                     }
-                    case ConnectionType::SharedNode:
-                        // Shared Node: 使用虚线 -.-，并通过 HTML 换行展示共享节点数量
-                        file << " -.-|\"Shared<br/>(" << edge.count << " nodes)\"| ";
-                        break;
-                    case ConnectionType::MPC:
-                        // 刚体 / MPC：保留原有粗箭头样式
-                        file << " ==>|MPC| ";
-                        break;
+                } else if (edge.type == ConnectionType::SharedNode) {
+                    file << "label: 'Shared (" << edge.count << ")', dashes: true, color: '#7f8c8d'";
+                } else {
+                    file << "label: 'MPC', arrows: 'to', width: 2, color: '#333'";
                 }
-
-                file << tgt_id << "\n";
+                file << " }";
+                first = false;
             }
         }
 
-        // --- 写入 JS 脚本进行缩放增强 ---
-        file << R"(
-    </div>
-    <script>
-        var panZoomInstance;
-        mermaid.initialize({ 
-            startOnLoad: true, 
-            theme: 'base',
-            flowchart: { useMaxWidth: false, htmlLabels: true }
-        });
+        // 3. 写入 Vis.js 配置和初始化脚本
+        file << R"HTML(
+        ]);
 
-        // 这是一个回调，等待 Mermaid 渲染完毕后注入 PanZoom
-        var callback = function() {
-            var svg = document.querySelector('#container svg');
-            if(svg) {
-                svg.style.height = '100%';
-                svg.style.width = '100%';
-                panZoomInstance = svgPanZoom(svg, {
-                    zoomEnabled: true,
-                    controlIconsEnabled: false,
-                    fit: true,
-                    center: true,
-                    minZoom: 0.1
-                });
-            }
+        var container = document.getElementById('network-container');
+        var data = { nodes: nodes, edges: edges };
+        var options = {
+            nodes: { shape: 'box', margin: 10, font: { size: 14 } },
+            edges: { font: { align: 'middle', size: 10 } },
+            physics: {
+                enabled: true,
+                barnesHut: { gravitationalConstant: -2000, centralGravity: 0.3, springLength: 150 },
+                stabilization: { iterations: 100 }
+            },
+            interaction: { hover: true, navigationButtons: true, keyboard: true }
         };
-
-        // 轮询检查 mermaid 是否渲染完成
-        var checkExist = setInterval(function() {
-           if (document.querySelector('#container svg')) {
-              clearInterval(checkExist);
-              callback();
-           }
-        }, 100);
-
-        function resetZoom() {
-            if(panZoomInstance) {
-                panZoomInstance.reset();
-                panZoomInstance.fit();
-                panZoomInstance.center();
-            }
-        }
+        var network = new vis.Network(container, data, options);
     </script>
 </body>
 </html>
-        )";
+)HTML";
 
         file.close();
-        spdlog::info("Interactive graph report generated at: {}", output_path);
     }
 
 private:
     static std::string sanitize_id(const std::string& name) {
         std::string out = name;
-        for (char& c : out) {
-            if (!isalnum(c)) c = '_';
-        }
+        for (char& c : out) if (!isalnum(c)) c = '_';
         if (isdigit(out[0])) out = "P_" + out;
         return out;
     }

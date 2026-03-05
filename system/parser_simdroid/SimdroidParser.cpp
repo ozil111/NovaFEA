@@ -917,17 +917,37 @@ void SimdroidParser::parse_boundary_conditions(const json& j_bcs, entt::registry
         struct DofConfig { std::string axis; double val; };
         std::vector<DofConfig> target_dofs;
 
-        const std::string type = val.value("Type", "Displacement");
+        // Simdroid format variant: "Dofs": [1,1,1,1,1,1] indicates constrained DOFs
+        // Order convention: [Ux, Uy, Uz, Rx, Ry, Rz]
+        if (val.contains("Dofs") && val["Dofs"].is_array()) {
+            const auto& arr = val["Dofs"];
+            const auto is_on = [&](size_t idx) -> bool {
+                if (idx >= arr.size()) return false;
+                if (arr[idx].is_boolean()) return arr[idx].get<bool>();
+                if (arr[idx].is_number_integer()) return arr[idx].get<int>() != 0;
+                if (arr[idx].is_number()) return std::abs(arr[idx].get<double>()) > 1e-12;
+                return false;
+            };
 
-        if (type == "Fixed" || type == "Encastre") {
-            target_dofs = {{"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"rx", 0.0}, {"ry", 0.0}, {"rz", 0.0}};
-        } else if (type == "Pinned") {
-            target_dofs = {{"x", 0.0}, {"y", 0.0}, {"z", 0.0}};
+            if (is_on(0)) target_dofs.push_back({"x", 0.0});
+            if (is_on(1)) target_dofs.push_back({"y", 0.0});
+            if (is_on(2)) target_dofs.push_back({"z", 0.0});
+            if (is_on(3)) target_dofs.push_back({"rx", 0.0});
+            if (is_on(4)) target_dofs.push_back({"ry", 0.0});
+            if (is_on(5)) target_dofs.push_back({"rz", 0.0});
         } else {
-            // "Displacement" or specific type
-            if (val.contains("U1") || val.contains("X")) target_dofs.push_back({"x", val.value("U1", val.value("X", 0.0))});
-            if (val.contains("U2") || val.contains("Y")) target_dofs.push_back({"y", val.value("U2", val.value("Y", 0.0))});
-            if (val.contains("U3") || val.contains("Z")) target_dofs.push_back({"z", val.value("U3", val.value("Z", 0.0))});
+            const std::string type = val.value("Type", "Displacement");
+
+            if (type == "Fixed" || type == "Encastre") {
+                target_dofs = {{"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"rx", 0.0}, {"ry", 0.0}, {"rz", 0.0}};
+            } else if (type == "Pinned") {
+                target_dofs = {{"x", 0.0}, {"y", 0.0}, {"z", 0.0}};
+            } else {
+                // "Displacement" or specific type
+                if (val.contains("U1") || val.contains("X")) target_dofs.push_back({"x", val.value("U1", val.value("X", 0.0))});
+                if (val.contains("U2") || val.contains("Y")) target_dofs.push_back({"y", val.value("U2", val.value("Y", 0.0))});
+                if (val.contains("U3") || val.contains("Z")) target_dofs.push_back({"z", val.value("U3", val.value("Z", 0.0))});
+            }
         }
 
         if (target_dofs.empty()) continue;
