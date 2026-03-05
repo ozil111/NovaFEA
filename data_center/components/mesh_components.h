@@ -223,6 +223,16 @@ namespace Component {
     };
 
     /**
+     * @brief [新] 节点基础加速度（重力/地基加速度）组件
+     * @details 与 Component::BaseAccelerationLoad（载荷定义）区分开：
+     *          该组件用于在求解阶段缓存“已作用到节点上的基础加速度”。
+     *          解析阶段通常只创建 BaseAccelerationLoad 并通过 AppliedLoadRef 关联到节点。
+     */
+    struct BaseAcceleration {
+        double ax, ay, az;
+    };
+
+    /**
      * @brief 节点位移组件（用于显式动力学）
      * @details 附加到 Node 实体，存储节点在三个方向的位移分量
      */

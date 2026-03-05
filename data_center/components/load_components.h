@@ -59,6 +59,23 @@ namespace Component {
     };
 
     /**
+     * @brief [新] 附加到 Load 实体，存储基础/重力加速度（Base Acceleration）的定义
+     * @details 对应 Simdroid JSON 中的 Type="BaseAcceleration"（/GRAV）。
+     *          每个方向可分别指定常值与时间曲线（1 自变量 + 1 因变量函数）。
+     *          若 curve_entity 非 null，则该方向的加速度随时间按曲线缩放。
+     *          coord_sys 为可选局部坐标系名称/ID（Skew_ID），为空表示全局坐标系。
+     */
+    struct BaseAccelerationLoad {
+        double ax = 0.0;
+        double ay = 0.0;
+        double az = 0.0;
+        entt::entity x_curve_entity = entt::null;
+        entt::entity y_curve_entity = entt::null;
+        entt::entity z_curve_entity = entt::null;
+        std::string coord_sys;
+    };
+
+    /**
      * @brief [已弃用] 请使用 NodalLoad::curve_entity。保留仅为兼容旧数据。
      * @details 如果存在，载荷值会根据curve和时间进行缩放
      */

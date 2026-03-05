@@ -1108,7 +1108,68 @@ void SimdroidParser::parse_loads(const json& j_loads, entt::registry& registry) 
             }
             spdlog::info("  -> Applied {} '{}' to {} nodes.", type, key, node_members.size());
         }
-        // 2. Handle Pressure (Element Load) - Placeholder
+        // 2. Handle Base Acceleration (Gravity / Ground Acceleration) - /GRAV
+        else if (type == "BaseAcceleration") {
+            std::string set_name = val.value("NodeSet", "");
+            if (set_name.empty()) set_name = val.value("Set", "");
+
+            std::vector<entt::entity> target_nodes;
+            if (!set_name.empty()) {
+                entt::entity set_entity = find_set_by_name(registry, set_name);
+                if (set_entity == entt::null || !registry.all_of<Component::NodeSetMembers>(set_entity)) {
+                    spdlog::warn("Load '{}' refers to unknown NodeSet '{}'", key, set_name);
+                    continue;
+                }
+                target_nodes = registry.get<Component::NodeSetMembers>(set_entity).members;
+            } else {
+                // NodeSet not provided -> apply to all nodes
+                auto view_nodes = registry.view<const Component::NodeID>();
+                for (auto node_entity : view_nodes) target_nodes.push_back(node_entity);
+            }
+
+            Component::BaseAccelerationLoad grav{};
+            grav.ax = val.value("XValue", 0.0);
+            grav.ay = val.value("YValue", 0.0);
+            grav.az = val.value("ZValue", 0.0);
+            grav.coord_sys = val.value("CoordSys", "");
+            trim(grav.coord_sys);
+
+            auto resolve_curve = [&](const char* field) -> entt::entity {
+                if (!dof_map || !val.contains(field) || !val[field].is_string()) return entt::null;
+                std::string curve_name = val[field].get<std::string>();
+                trim(curve_name);
+                if (curve_name.empty()) return entt::null;
+                auto it = dof_map->curve_name_to_entity.find(curve_name);
+                if (it != dof_map->curve_name_to_entity.end() && registry.valid(it->second)) return it->second;
+                spdlog::warn("Load '{}' {} '{}' not found in Function.", key, field, curve_name);
+                return entt::null;
+            };
+
+            grav.x_curve_entity = resolve_curve("XTimeCurve");
+            grav.y_curve_entity = resolve_curve("YTimeCurve");
+            grav.z_curve_entity = resolve_curve("ZTimeCurve");
+
+            // Skip if nothing to apply
+            const bool has_any =
+                (std::abs(grav.ax) > 1e-12) || (std::abs(grav.ay) > 1e-12) || (std::abs(grav.az) > 1e-12) ||
+                (grav.x_curve_entity != entt::null) || (grav.y_curve_entity != entt::null) || (grav.z_curve_entity != entt::null);
+            if (!has_any || target_nodes.empty()) continue;
+
+            auto load_def_entity = registry.create();
+            registry.emplace<Component::LoadID>(load_def_entity, next_load_id++);
+            registry.emplace<Component::BaseAccelerationLoad>(load_def_entity, grav);
+            registry.emplace<Component::SetName>(load_def_entity, key);
+
+            int applied_count = 0;
+            for (auto node_entity : target_nodes) {
+                if (!registry.valid(node_entity)) continue;
+                auto& applied = registry.get_or_emplace<Component::AppliedLoadRef>(node_entity);
+                applied.load_entities.push_back(load_def_entity);
+                applied_count++;
+            }
+            spdlog::info("  -> Applied BaseAcceleration '{}' to {} nodes.", key, applied_count);
+        }
+        // 3. Handle Pressure (Element Load) - Placeholder
         else if (type == "Pressure") {
             std::string set_name = val.value("EleSet", "");
             spdlog::info("  -> Found Pressure Load '{}' on EleSet '{}'. (Solver conversion pending)", key, set_name);

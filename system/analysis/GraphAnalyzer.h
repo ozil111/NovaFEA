@@ -72,6 +72,7 @@ public:
 public:
     static bool has_load_or_fix(const PartGraph& g, const std::vector<std::string>& nodes) {
         for (const auto& n : nodes) {
+            // is_load_part: includes nodal loads (Force/Moment) and BaseAcceleration (/GRAV) via AppliedLoadRef
             if (g.nodes.at(n).is_load_part || g.nodes.at(n).is_constraint_part) return true;
         }
         return false;
