@@ -33,11 +33,32 @@ public:
 
         // -------------------------------------------------------
         // 2. 处理 Contact (显式连接)
+        //    同时读取 ContactTypeTag，用于细分接触类型 (Tie / Type7 / Type24 等)
         // -------------------------------------------------------
-        auto view_contacts = registry.view<const Component::ContactBase>();
+        auto view_contacts = registry.view<const Component::ContactBase, const Component::ContactTypeTag>();
         for (auto entity : view_contacts) {
             const auto& contact = view_contacts.get<const Component::ContactBase>(entity);
-            
+            const auto& type_tag = view_contacts.get<const Component::ContactTypeTag>(entity);
+
+            // 将 ContactInterType 映射为更具体的算法名称
+            // /INTER/TYPE2 (Tie), /INTER/TYPE7 (N-S), /INTER/TYPE24 (General)
+            std::string sub_type;
+            switch (type_tag.type) {
+                case Component::ContactInterType::Tie:
+                    sub_type = "Tie";
+                    break;
+                case Component::ContactInterType::NodeToSurface:
+                    // 使用 Radioss 习惯名称，便于在可视化中显示为 Contact (Type7)
+                    sub_type = "Type7";
+                    break;
+                case Component::ContactInterType::General:
+                    sub_type = "Type24";
+                    break;
+                default:
+                    sub_type = "Unknown";
+                    break;
+            }
+
             auto master_parts = get_parts_from_set(registry, inspector, contact.master_entity);
             auto slave_parts = get_parts_from_set(registry, inspector, contact.slave_entity);
 
@@ -45,8 +66,8 @@ public:
                 for (const auto& s : slave_parts) {
                     if (m != s) {
                         // Contact 连接通常被视为“强连接”，权重设低一点 (1.0)
-                        graph.add_edge(m, s, ConnectionType::Contact, 1.0);
-                        graph.add_edge(s, m, ConnectionType::Contact, 1.0);
+                        graph.add_edge(m, s, ConnectionType::Contact, 1.0, 1, sub_type);
+                        graph.add_edge(s, m, ConnectionType::Contact, 1.0, 1, sub_type);
                     }
                 }
             }
@@ -114,24 +135,62 @@ private:
     static std::vector<std::string> get_parts_from_set(entt::registry& reg, SimdroidInspector& insp, entt::entity set_entity) {
         std::vector<std::string> parts;
         if (!reg.valid(set_entity)) return parts;
-        
-        // 如果是 Element Set
+
+        std::set<std::string> unique_parts;
+
+        // 1) Element Set: 直接通过 ElementID / OriginalID -> Part
         if (reg.all_of<Component::ElementSetMembers>(set_entity)) {
             const auto& members = reg.get<Component::ElementSetMembers>(set_entity).members;
-            // 优化：不需要遍历所有 member，只需要采样几个或者全部遍历去重
-            // 为了准确性，我们遍历全部，但用 Set 去重
-            std::set<std::string> unique_parts;
             for (auto ent : members) {
-                if (reg.all_of<Component::OriginalID>(ent)) {
-                    int eid = reg.get<Component::OriginalID>(ent).value;
+                int eid = -1;
+                if (reg.all_of<Component::ElementID>(ent)) {
+                    eid = reg.get<Component::ElementID>(ent).value;
+                } else if (reg.all_of<Component::OriginalID>(ent)) {
+                    eid = reg.get<Component::OriginalID>(ent).value;
+                }
+                if (eid >= 0 && insp.eid_to_part.count(eid)) {
+                    unique_parts.insert(insp.eid_to_part.at(eid));
+                }
+            }
+        }
+
+        // 2) Node Set: 通过 NodeID -> nid_to_elems -> eid_to_part
+        if (reg.all_of<Component::NodeSetMembers>(set_entity)) {
+            const auto& members = reg.get<Component::NodeSetMembers>(set_entity).members;
+            for (auto node_ent : members) {
+                if (!reg.valid(node_ent) || !reg.all_of<Component::NodeID>(node_ent)) continue;
+                int nid = reg.get<Component::NodeID>(node_ent).value;
+                auto it = insp.nid_to_elems.find(nid);
+                if (it == insp.nid_to_elems.end()) continue;
+                for (int eid : it->second) {
                     if (insp.eid_to_part.count(eid)) {
                         unique_parts.insert(insp.eid_to_part.at(eid));
                     }
                 }
             }
-            parts.assign(unique_parts.begin(), unique_parts.end());
         }
-        // TODO: 支持 Node Set (通过 Node -> Elem -> Part)
+
+        // 3) Surface Set: 通过 SurfaceParentElement -> ElementID -> eid_to_part
+        if (reg.all_of<Component::SurfaceSetMembers>(set_entity)) {
+            const auto& members = reg.get<Component::SurfaceSetMembers>(set_entity).members;
+            for (auto surf_ent : members) {
+                if (!reg.valid(surf_ent) || !reg.all_of<Component::SurfaceParentElement>(surf_ent)) continue;
+                entt::entity parent_elem = reg.get<Component::SurfaceParentElement>(surf_ent).element;
+                if (!reg.valid(parent_elem)) continue;
+
+                int eid = -1;
+                if (reg.all_of<Component::ElementID>(parent_elem)) {
+                    eid = reg.get<Component::ElementID>(parent_elem).value;
+                } else if (reg.all_of<Component::OriginalID>(parent_elem)) {
+                    eid = reg.get<Component::OriginalID>(parent_elem).value;
+                }
+                if (eid >= 0 && insp.eid_to_part.count(eid)) {
+                    unique_parts.insert(insp.eid_to_part.at(eid));
+                }
+            }
+        }
+
+        parts.assign(unique_parts.begin(), unique_parts.end());
         return parts;
     }
 };

@@ -21,6 +21,8 @@ enum class ConnectionType {
 struct EdgeInfo {
     std::string target_part;
     ConnectionType type;
+    // 细分连接类型，例如 "Tie", "Type7", "Type24" 等
+    std::string sub_type;
     double weight;
     int count; // 共享节点数量 或 接触定义数量
 };
@@ -42,20 +44,27 @@ public:
         }
     }
 
-    void add_edge(const std::string& src, const std::string& tgt, ConnectionType type, double weight, int count = 1) {
+    // sub_type 用于区分不同的接触算法或连接子类型
+    // 例如：ConnectionType::Contact 下的 "Tie" / "Type7" / "Type24"
+    void add_edge(const std::string& src,
+                  const std::string& tgt,
+                  ConnectionType type,
+                  double weight,
+                  int count = 1,
+                  const std::string& sub_type = {}) {
         if (nodes.find(src) == nodes.end()) add_node(src);
         if (nodes.find(tgt) == nodes.end()) add_node(tgt);
 
-        // 检查是否已存在相同类型的边，如果是则累加计数
+        // 检查是否已存在相同类型 + 相同子类型 的边，如果是则累加计数
         auto& edges = nodes[src].edges;
         for (auto& edge : edges) {
-            if (edge.target_part == tgt && edge.type == type) {
+            if (edge.target_part == tgt && edge.type == type && edge.sub_type == sub_type) {
                 edge.count += count;
                 // 取最小权重 (阻抗越小连接越紧密)
                 if (weight < edge.weight) edge.weight = weight;
                 return;
             }
         }
-        edges.push_back({tgt, type, weight, count});
+        edges.push_back({tgt, type, sub_type, weight, count});
     }
 };

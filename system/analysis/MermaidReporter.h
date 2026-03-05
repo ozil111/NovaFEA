@@ -45,11 +45,16 @@ public:
     </div>
     <div id="container" class="mermaid">
 graph LR
-    %% 全局样式
+    %% 全局样式 - 节点
     classDef load fill:#ffcccc,stroke:#ff0000,stroke-width:3px;
     classDef fix fill:#e6ccff,stroke:#800080,stroke-width:3px;
     classDef normal fill:#f9f9f9,stroke:#333,stroke-width:1px;
     classDef critical stroke:#ff0000,stroke-width:2px,stroke-dasharray: 5 5;
+
+    %% 连接类型色彩 (用于图例 / 一致配色)
+    classDef tieConn stroke:#e67e22,stroke-width:4px;
+    classDef contactConn stroke:#2980b9,stroke-width:2px;
+    classDef sharedConn stroke:#7f8c8d,stroke-width:2px,stroke-dasharray: 5 5;
         )HTML";
 
         // --- 生成 Mermaid 内容 ---
@@ -97,23 +102,30 @@ graph LR
                 if (src_id >= tgt_id) continue; // 去重，只画单向
 
                 file << "    " << src_id;
-                
-                // 根据连接类型使用不同的 Mermaid 语法
+
+                // 根据连接类型使用不同的 Mermaid 语法与标签
                 switch (edge.type) {
-                    case ConnectionType::Contact:
-                        // 粗实线，带 Contact 标签
-                        file << " ===|Contact| ";
+                    case ConnectionType::Contact: {
+                        // Tie 连接：使用最粗实线表现（Mermaid 中使用粗线 ===，并在标签中标明 Tie）
+                        if (edge.sub_type == "Tie") {
+                            file << " ===|\"Tie\"| ";
+                        } else {
+                            // 普通接触：使用双线 === 并标注具体类型，例如 Contact (Type7)
+                            std::string label = edge.sub_type.empty() ? "Contact" : "Contact (" + edge.sub_type + ")";
+                            file << " ===|\"" << label << "\"| ";
+                        }
                         break;
+                    }
                     case ConnectionType::SharedNode:
-                        // 虚线，带 Shared 标签和数量
+                        // Shared Node: 使用虚线 -.-，并通过 HTML 换行展示共享节点数量
                         file << " -.-|\"Shared<br/>(" << edge.count << " nodes)\"| ";
                         break;
                     case ConnectionType::MPC:
-                        // 粗箭头
+                        // 刚体 / MPC：保留原有粗箭头样式
                         file << " ==>|MPC| ";
                         break;
                 }
-                
+
                 file << tgt_id << "\n";
             }
         }
