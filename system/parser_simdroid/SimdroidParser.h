@@ -10,6 +10,14 @@ class SimdroidParser {
         static bool parse(const std::string& mesh_path, 
                           const std::string& control_path, 
                           DataContext& context);
+
+        // Re-run post-parse validations (contacts/rigid bodies/cross-constraints).
+        // Intended for interactive mode commands.
+        static void validate_constraints(entt::registry& registry);
+
+        // Print cached cross-constraint conflict details collected during last validation.
+        // If none were collected, prints a short "no conflicts" message.
+        static void list_constraint_warnings(entt::registry& registry);
     private:
         // 使用 Vector 作为 O(1) 查找表
         static std::vector<entt::entity> node_lookup;

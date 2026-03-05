@@ -312,6 +312,28 @@ void collect_set_definitions_from_file(const std::string& path, MeshSetDefs& def
 
 } // namespace
 
+namespace {
+
+struct CrossConstraintConflictDetail {
+    int node_id = -1;
+    std::vector<std::string> as_master;
+    std::vector<std::string> as_slave;
+};
+
+struct ConstraintWarningReport {
+    std::vector<CrossConstraintConflictDetail> cross_conflicts;
+};
+
+ConstraintWarningReport& get_constraint_warning_report(entt::registry& registry) {
+    auto& ctx = registry.ctx();
+    if (!ctx.contains<ConstraintWarningReport>()) {
+        return ctx.emplace<ConstraintWarningReport>();
+    }
+    return ctx.get<ConstraintWarningReport>();
+}
+
+} // namespace
+
 // Helper to normalize vector
 static std::tuple<double, double, double> normalize(double x, double y, double z) {
     const double len = std::sqrt(x * x + y * y + z * z);
@@ -889,6 +911,45 @@ void SimdroidParser::parse_control_json(const std::string& path, DataContext& ct
     validate_contacts(registry);
     validate_rigid_bodies(registry);
     validate_cross_constraints(registry);
+}
+
+void SimdroidParser::validate_constraints(entt::registry& registry) {
+    validate_contacts(registry);
+    validate_rigid_bodies(registry);
+    validate_cross_constraints(registry);
+}
+
+void SimdroidParser::list_constraint_warnings(entt::registry& registry) {
+    if (!registry.ctx().contains<ConstraintWarningReport>()) {
+        spdlog::info("Constraint warnings: no cached report (run import_simdroid or validate_constraints first).");
+        return;
+    }
+
+    const auto& report = registry.ctx().get<ConstraintWarningReport>();
+    if (report.cross_conflicts.empty()) {
+        spdlog::info("Constraint warnings: no cross-constraint master/slave conflicts cached.");
+        return;
+    }
+
+    spdlog::warn("Cross-constraint conflict details ({} node(s)):", report.cross_conflicts.size());
+    const std::size_t max_show = 50;
+    for (std::size_t i = 0; i < report.cross_conflicts.size() && i < max_show; ++i) {
+        const auto& c = report.cross_conflicts[i];
+
+        auto join = [](const std::vector<std::string>& v) {
+            std::string out;
+            for (std::size_t k = 0; k < v.size(); ++k) {
+                if (k) out += ", ";
+                out += v[k];
+            }
+            return out;
+        };
+
+        spdlog::warn("  - Node {}: master=[{}], slave=[{}]", c.node_id, join(c.as_master), join(c.as_slave));
+    }
+    if (report.cross_conflicts.size() > max_show) {
+        spdlog::warn("  ... {} more node(s) not shown.", report.cross_conflicts.size() - max_show);
+    }
 }
 
 entt::entity SimdroidParser::find_set_by_name(entt::registry& registry, const std::string& name) {
@@ -1871,6 +1932,9 @@ void SimdroidParser::validate_rigid_bodies(entt::registry& registry) {
 //   (e.g. Contact/Tie master 节点同时是 RigidBody slave)
 // =========================================================
 void SimdroidParser::validate_cross_constraints(entt::registry& registry) {
+    auto& report = get_constraint_warning_report(registry);
+    report.cross_conflicts.clear();
+
     // role -> { node_entity, ...}
     // 收集所有 Contact 和 RigidBody 定义中的 master/slave 节点
     struct NodeRole {
@@ -1961,7 +2025,23 @@ void SimdroidParser::validate_cross_constraints(entt::registry& registry) {
         ++conflict_count;
         for (const auto& name : role.as_master) conflict_defs.insert(name);
         for (const auto& name : role.as_slave)  conflict_defs.insert(name);
+
+        int nid = -1;
+        if (registry.all_of<Component::NodeID>(node_e)) {
+            nid = registry.get<Component::NodeID>(node_e).value;
+        }
+
+        CrossConstraintConflictDetail detail;
+        detail.node_id = nid;
+        detail.as_master = role.as_master;
+        detail.as_slave = role.as_slave;
+        report.cross_conflicts.push_back(std::move(detail));
     }
+
+    std::sort(report.cross_conflicts.begin(), report.cross_conflicts.end(),
+              [](const CrossConstraintConflictDetail& a, const CrossConstraintConflictDetail& b) {
+                  return a.node_id < b.node_id;
+              });
 
     if (conflict_count > 0) {
         // 汇总级别的告警，避免对每个节点逐条输出

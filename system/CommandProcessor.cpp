@@ -102,7 +102,7 @@ void process_command(const std::string& command_line, AppSession& session) {
     else if (command == "help") {
         spdlog::info("Available commands: import, import_simdroid, export_simdroid, "
                      "info, build_topology, list_bodies, show_body, "
-                     "list_parts, delete_part, graph, "
+                     "list_parts, delete_part, graph, validate_constraints, list_constraint_warnings, "
                      "node, node_add, node_move, node_delete, "
                      "elem, elem_add, elem_delete, "
                      "list_sets, set_info, set_addnode, set_addelem, set_removenode, set_removeelem, "
@@ -445,6 +445,24 @@ void process_command(const std::string& command_line, AppSession& session) {
         std::string cmd = "start " + output_filename;
         system(cmd.c_str());
 #endif
+    }
+    else if (command == "validate_constraints") {
+        if (!session.mesh_loaded) {
+            spdlog::warn("No mesh loaded. Please 'import_simdroid' first.");
+            return;
+        }
+
+        spdlog::info("Re-running Simdroid constraint/contact validations...");
+        auto& registry = session.data.registry;
+        SimdroidParser::validate_constraints(registry);
+    }
+    else if (command == "list_constraint_warnings") {
+        if (!session.mesh_loaded) {
+            spdlog::warn("No mesh loaded. Please 'import_simdroid' first.");
+            return;
+        }
+        auto& registry = session.data.registry;
+        SimdroidParser::list_constraint_warnings(registry);
     }
     // =======================================================
     // 基础节点 / 单元操作
