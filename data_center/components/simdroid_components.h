@@ -103,6 +103,21 @@ namespace Component {
         entt::entity master_node_set; // 或者 master_node entity
         entt::entity slave_node_set;
     };
+
+    // 3b. Radioss /RBODY 刚体定义
+    enum class InertiaMode { Automatic = 2, Input = 3 };
+
+    struct RigidBody {
+        entt::entity master_node = entt::null;      // 主节点实体 (node_ID)
+        entt::entity slave_node_set = entt::null;    // 从节点集实体 (grnd_ID)
+
+        std::string coord_sys;                       // 局部坐标系 ID/名称 (Skew_ID)
+        InertiaMode inertia_cal = InertiaMode::Automatic; // Ispher
+        
+        double mass = 0.0;
+        int cog_mode = 1;                            // ICoG: 1/2/3/4
+        double inertia_tensor[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}; // I11, I22, I33, I12, I23, I13
+    };
     
     // 4. 分析结果组件 (用于存储传力路径分析结果，避免重复计算)
     struct ForcePathNode {

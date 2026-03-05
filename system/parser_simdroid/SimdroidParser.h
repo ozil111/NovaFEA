@@ -30,6 +30,11 @@ class SimdroidParser {
         static void parse_rigid_walls(const nlohmann::json& j, entt::registry& registry);
         static void parse_analysis_settings(const nlohmann::json& j, entt::registry& registry, DataContext& ctx);
         
+        // [新增] Radioss /RBODY rigid bodies
+        static void parse_radioss_rigid_bodies(const nlohmann::json& j, entt::registry& registry);
+        static void validate_rigid_bodies(entt::registry& registry);
+        static void validate_cross_constraints(entt::registry& registry);
+
         // Helper to find a set entity by name
         static entt::entity find_set_by_name(entt::registry& registry, const std::string& name);
 

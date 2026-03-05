@@ -862,6 +862,12 @@ void SimdroidParser::parse_control_json(const std::string& path, DataContext& ct
         }
     }
 
+    // [新增] Radioss /RBODY rigid bodies (top-level)
+    if (j.contains("RigidBody") && j["RigidBody"].is_object()) {
+        spdlog::info("Parsing Radioss RigidBodies...");
+        parse_radioss_rigid_bodies(j["RigidBody"], registry);
+    }
+
     if (j.contains("Load") && j["Load"].is_object()) {
         spdlog::info("Parsing Loads from Simdroid Control...");
         parse_loads(j["Load"], registry);
@@ -879,8 +885,10 @@ void SimdroidParser::parse_control_json(const std::string& path, DataContext& ct
         parse_analysis_settings(j["Step"], registry, ctx);
     }
 
-    // Post-parse: validate contact entity references
+    // Post-parse: validate entity references & cross-constraint overlap
     validate_contacts(registry);
+    validate_rigid_bodies(registry);
+    validate_cross_constraints(registry);
 }
 
 entt::entity SimdroidParser::find_set_by_name(entt::registry& registry, const std::string& name) {
@@ -1654,6 +1662,238 @@ void SimdroidParser::parse_mesh_dat(const std::string& path, DataContext& ctx) {
         auto& members = registry.get_or_emplace<Component::SurfaceSetMembers>(e);
         add_to_set(members.members, ranges, surface_lookup);
     }
+}
+
+// =========================================================
+// 实现：Radioss /RBODY 刚体解析
+// =========================================================
+void SimdroidParser::parse_radioss_rigid_bodies(const json& j_rb, entt::registry& registry) {
+    for (auto& [name, val] : j_rb.items()) {
+        if (!val.is_object()) continue;
+
+        Component::RigidBody rb{};
+
+        // 1. Master node: 先按集合名查找，再按 node ID 回退
+        std::string master_name = val.value("MasterNodeSet", "");
+        if (!master_name.empty()) {
+            rb.master_node = find_set_by_name(registry, master_name);
+            if (rb.master_node == entt::null) {
+                try {
+                    int nid = std::stoi(master_name);
+                    if (nid >= 0 && static_cast<size_t>(nid) < node_lookup.size())
+                        rb.master_node = node_lookup[nid];
+                } catch (...) {}
+            }
+            if (rb.master_node == entt::null)
+                spdlog::warn("RigidBody '{}': MasterNodeSet '{}' not found.", name, master_name);
+        }
+
+        // 2. Slave node set
+        std::string slave_name = val.value("SlaveNodeSet", "");
+        if (!slave_name.empty()) {
+            rb.slave_node_set = find_set_by_name(registry, slave_name);
+            if (rb.slave_node_set == entt::null)
+                spdlog::warn("RigidBody '{}': SlaveNodeSet '{}' not found.", name, slave_name);
+        }
+
+        // 3. 物理属性
+        rb.coord_sys = val.value("CoordSys", "");
+
+        std::string i_cal = val.value("InertiaCal", "automatic");
+        rb.inertia_cal = (to_lower_copy(i_cal) == "input")
+                             ? Component::InertiaMode::Input
+                             : Component::InertiaMode::Automatic;
+
+        rb.mass = val.value("mass", 0.0);
+        rb.cog_mode = val.value("CoG", 1);
+
+        // 4. 转动惯量数组 [I11, I22, I33, I12, I23, I13]
+        if (val.contains("InertiaInput") && val["InertiaInput"].is_array()) {
+            const auto& arr = val["InertiaInput"];
+            for (size_t i = 0; i < std::min<size_t>(6, arr.size()); ++i)
+                rb.inertia_tensor[i] = arr[i].get<double>();
+        }
+
+        // 5. 创建实体并挂载
+        const auto rb_entity = registry.create();
+        registry.emplace<Component::RigidBody>(rb_entity, rb);
+        registry.emplace<Component::SetName>(rb_entity, name);
+
+        spdlog::info("  -> RigidBody '{}' added (Master: {}, Slave: {})", name, master_name, slave_name);
+    }
+}
+
+// =========================================================
+// Post-parse: validate rigid body master/slave overlap
+// =========================================================
+void SimdroidParser::validate_rigid_bodies(entt::registry& registry) {
+    auto view = registry.view<const Component::RigidBody, const Component::SetName>();
+    int warned = 0;
+    int total = 0;
+
+    for (auto entity : view) {
+        ++total;
+        const auto& rb = view.get<const Component::RigidBody>(entity);
+        const auto& sn = view.get<const Component::SetName>(entity);
+
+        // Collect master nodes
+        std::unordered_set<entt::entity> master_nodes;
+        if (rb.master_node != entt::null && registry.valid(rb.master_node)) {
+            if (registry.all_of<Component::NodeSetMembers>(rb.master_node)) {
+                for (auto n : registry.get<Component::NodeSetMembers>(rb.master_node).members)
+                    master_nodes.insert(n);
+            } else if (registry.all_of<Component::NodeID>(rb.master_node)) {
+                master_nodes.insert(rb.master_node);
+            }
+        }
+
+        // Collect slave nodes
+        std::unordered_set<entt::entity> slave_nodes;
+        if (rb.slave_node_set != entt::null && registry.valid(rb.slave_node_set)) {
+            if (registry.all_of<Component::NodeSetMembers>(rb.slave_node_set)) {
+                for (auto n : registry.get<Component::NodeSetMembers>(rb.slave_node_set).members)
+                    slave_nodes.insert(n);
+            }
+        }
+
+        // Detect overlap
+        std::vector<int> overlap_ids;
+        for (auto n : master_nodes) {
+            if (slave_nodes.count(n)) {
+                if (registry.valid(n) && registry.all_of<Component::NodeID>(n))
+                    overlap_ids.push_back(registry.get<Component::NodeID>(n).value);
+            }
+        }
+        if (!overlap_ids.empty()) {
+            std::sort(overlap_ids.begin(), overlap_ids.end());
+            std::string ids_str;
+            for (size_t k = 0; k < std::min(overlap_ids.size(), size_t(10)); ++k) {
+                if (k) ids_str += ", ";
+                ids_str += std::to_string(overlap_ids[k]);
+            }
+            if (overlap_ids.size() > 10) ids_str += ", ...";
+            spdlog::warn("RigidBody '{}': {} node(s) belong to BOTH master and slave [{}]",
+                         sn.value, overlap_ids.size(), ids_str);
+            ++warned;
+        }
+    }
+
+    if (warned > 0)
+        spdlog::warn("RigidBody validation: {} issue(s) found.", warned);
+    else
+        spdlog::info("RigidBody validation: all {} rigid body(ies) OK.", total);
+}
+
+// =========================================================
+// Post-parse: cross-constraint validation
+//   检测同一节点在不同定义中同时扮演 master 和 slave
+//   (e.g. Contact/Tie master 节点同时是 RigidBody slave)
+// =========================================================
+void SimdroidParser::validate_cross_constraints(entt::registry& registry) {
+    // role -> { node_entity, ...}
+    // 收集所有 Contact 和 RigidBody 定义中的 master/slave 节点
+    struct NodeRole {
+        std::vector<std::string> as_master; // 作为 master 的定义名
+        std::vector<std::string> as_slave;  // 作为 slave 的定义名
+    };
+    std::unordered_map<entt::entity, NodeRole> node_roles;
+
+    auto collect_nodes_from_set = [&](entt::entity se, std::vector<entt::entity>& out) {
+        if (se == entt::null || !registry.valid(se)) return;
+        if (registry.all_of<Component::NodeSetMembers>(se)) {
+            for (auto n : registry.get<Component::NodeSetMembers>(se).members)
+                out.push_back(n);
+        }
+        if (registry.all_of<Component::SurfaceSetMembers>(se)) {
+            for (auto surf : registry.get<Component::SurfaceSetMembers>(se).members) {
+                if (!registry.valid(surf)) continue;
+                if (registry.all_of<Component::SurfaceConnectivity>(surf))
+                    for (auto n : registry.get<Component::SurfaceConnectivity>(surf).nodes)
+                        out.push_back(n);
+            }
+        }
+        // 如果 se 本身就是一个节点
+        if (registry.all_of<Component::NodeID>(se))
+            out.push_back(se);
+    };
+
+    // 1) Contact 定义
+    {
+        auto view = registry.view<const Component::ContactBase>();
+        for (auto entity : view) {
+            const auto& cb = view.get<const Component::ContactBase>(entity);
+            const std::string& def_name = cb.name;
+
+            std::vector<entt::entity> m_nodes, s_nodes;
+            collect_nodes_from_set(cb.master_entity, m_nodes);
+            collect_nodes_from_set(cb.slave_entity, s_nodes);
+
+            for (auto n : m_nodes) node_roles[n].as_master.push_back("Contact:" + def_name);
+            for (auto n : s_nodes) node_roles[n].as_slave.push_back("Contact:" + def_name);
+        }
+    }
+
+    // 2) RigidBody 定义
+    {
+        auto view = registry.view<const Component::RigidBody, const Component::SetName>();
+        for (auto entity : view) {
+            const auto& rb = view.get<const Component::RigidBody>(entity);
+            const std::string& def_name = view.get<const Component::SetName>(entity).value;
+
+            std::vector<entt::entity> m_nodes, s_nodes;
+            collect_nodes_from_set(rb.master_node, m_nodes);
+            collect_nodes_from_set(rb.slave_node_set, s_nodes);
+
+            for (auto n : m_nodes) node_roles[n].as_master.push_back("RigidBody:" + def_name);
+            for (auto n : s_nodes) node_roles[n].as_slave.push_back("RigidBody:" + def_name);
+        }
+    }
+
+    // 3) RigidBodyConstraint (NodalRigidBody / DistributingCoupling)
+    {
+        auto view = registry.view<const Component::RigidBodyConstraint, const Component::SetName>();
+        for (auto entity : view) {
+            const auto& rbc = view.get<const Component::RigidBodyConstraint>(entity);
+            const std::string& def_name = view.get<const Component::SetName>(entity).value;
+
+            std::vector<entt::entity> m_nodes, s_nodes;
+            collect_nodes_from_set(rbc.master_node_set, m_nodes);
+            collect_nodes_from_set(rbc.slave_node_set, s_nodes);
+
+            for (auto n : m_nodes) node_roles[n].as_master.push_back("MPC:" + def_name);
+            for (auto n : s_nodes) node_roles[n].as_slave.push_back("MPC:" + def_name);
+        }
+    }
+
+    // 4) 检测冲突：同一节点既是某定义的 master 又是另一定义的 slave
+    int conflict_count = 0;
+    for (auto& [node_e, role] : node_roles) {
+        if (role.as_master.empty() || role.as_slave.empty()) continue;
+        if (!registry.valid(node_e)) continue;
+
+        int nid = registry.all_of<Component::NodeID>(node_e)
+                      ? registry.get<Component::NodeID>(node_e).value : -1;
+
+        std::string m_str, s_str;
+        for (size_t i = 0; i < std::min(role.as_master.size(), size_t(3)); ++i) {
+            if (i) m_str += ", ";
+            m_str += role.as_master[i];
+        }
+        if (role.as_master.size() > 3) m_str += ", ...";
+        for (size_t i = 0; i < std::min(role.as_slave.size(), size_t(3)); ++i) {
+            if (i) s_str += ", ";
+            s_str += role.as_slave[i];
+        }
+        if (role.as_slave.size() > 3) s_str += ", ...";
+
+        spdlog::warn("Node {} is master in [{}] AND slave in [{}]", nid, m_str, s_str);
+        ++conflict_count;
+    }
+
+    if (conflict_count > 0)
+        spdlog::warn("Cross-constraint validation: {} node(s) with conflicting master/slave roles.", conflict_count);
+    else
+        spdlog::info("Cross-constraint validation: no master/slave conflicts detected.");
 }
 
 // =========================================================
