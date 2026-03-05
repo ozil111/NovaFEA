@@ -21,6 +21,7 @@
 #include <string>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -107,6 +108,86 @@ inline entt::entity get_or_create_set_entity(entt::registry& registry, const std
     registry.emplace<Component::SetName>(e, name);
     return e;
 }
+
+// ---------------------------------------------------------------
+// String-to-Enum mapping tables for Contact parameters
+// ---------------------------------------------------------------
+
+const std::unordered_map<std::string, Component::ContactInterType> kContactTypeMap = {
+    {"nodetosurfacetie",     Component::ContactInterType::Tie},
+    {"surfacetosurfacetie",  Component::ContactInterType::Tie},
+    {"nodetosurface",        Component::ContactInterType::NodeToSurface},
+    {"nodetosurfacecontact", Component::ContactInterType::NodeToSurface},
+    {"surfacetosurface",     Component::ContactInterType::NodeToSurface},
+    {"generalcontact",       Component::ContactInterType::General},
+};
+
+const std::unordered_map<std::string, Component::ContactFormulationType> kFormulationMap = {
+    {"standard",           Component::ContactFormulationType::Standard},
+    {"optimized",          Component::ContactFormulationType::Optimized},
+    {"failshbrick",        Component::ContactFormulationType::FailShBrick},
+    {"failsh",             Component::ContactFormulationType::FailSh},
+    {"failbrick",          Component::ContactFormulationType::FailBrick},
+    {"penalty",            Component::ContactFormulationType::Penalty},
+    {"standswitchpenal",   Component::ContactFormulationType::StandSwitchPenal},
+    {"optimswitchpenal",   Component::ContactFormulationType::OptimSwitchPenal},
+};
+
+const std::unordered_map<std::string, Component::InterfaceStiffnessType> kInterfaceStiffnessMap = {
+    {"default", Component::InterfaceStiffnessType::Default},
+    {"main",    Component::InterfaceStiffnessType::Main},
+    {"maximum", Component::InterfaceStiffnessType::Maximum},
+    {"minimum", Component::InterfaceStiffnessType::Minimum},
+};
+
+const std::unordered_map<std::string, Component::SearchMethodType> kSearchMethodMap = {
+    {"box",     Component::SearchMethodType::Box},
+    {"segment", Component::SearchMethodType::Segment},
+};
+
+const std::unordered_map<std::string, Component::FrictionLawType> kFrictionLawMap = {
+    {"coulomb",  Component::FrictionLawType::Coulomb},
+    {"viscous",  Component::FrictionLawType::Viscous},
+    {"darmstad", Component::FrictionLawType::Darmstad},
+    {"renard",   Component::FrictionLawType::Renard},
+    {"expdecay", Component::FrictionLawType::ExpDecay},
+};
+
+const std::unordered_map<std::string, Component::GapFlagType> kGapFlagMap = {
+    {"variable",         Component::GapFlagType::Variable},
+    {"variablescale",    Component::GapFlagType::VariableScale},
+    {"variablescalepen", Component::GapFlagType::VariableScalePen},
+    {"gapmin",           Component::GapFlagType::Gapmin},
+};
+
+const std::unordered_map<std::string, Component::IgnoreType> kIgnoreMap = {
+    {"length",        Component::IgnoreType::Length},
+    {"mainthick",     Component::IgnoreType::MainThick},
+    {"mainthickzero", Component::IgnoreType::MainThickZero},
+};
+
+const std::unordered_map<std::string, Component::FailModeType> kFailModeMap = {
+    {"max",  Component::FailModeType::Max},
+    {"quad", Component::FailModeType::Quad},
+};
+
+const std::unordered_map<std::string, Component::RuptureFlagType> kRuptureFlagMap = {
+    {"tractioncompress", Component::RuptureFlagType::TractionCompress},
+    {"traction",         Component::RuptureFlagType::Traction},
+};
+
+template <typename EnumT>
+EnumT lookup_enum(const std::unordered_map<std::string, EnumT>& map,
+                  const std::string& raw, EnumT fallback) {
+    auto it = map.find(to_lower_copy(raw));
+    return it != map.end() ? it->second : fallback;
+}
+
+// Stiffness form int mapping (TYPE7/TYPE24): string -> Istf code
+const std::unordered_map<std::string, int> kStiffnessFormMap = {
+    {"stiffnessfactor", 1}, {"average", 2}, {"maximum", 3},
+    {"minimum", 4}, {"masteronly", 1000},
+};
 
 struct MeshSetDefs {
     std::unordered_map<std::string, std::vector<IdRange>> element_sets;
@@ -598,34 +679,160 @@ void SimdroidParser::parse_control_json(const std::string& path, DataContext& ct
     }
 
     if (j.contains("Contact") && j["Contact"].is_object()) {
-        for (auto it = j["Contact"].begin(); it != j["Contact"].end(); ++it) {
-             const std::string contact_name = it.key();
-             const auto& contact_info = it.value();
-             
-             Component::ContactDefinition def;
-             def.name = contact_name;
-             def.friction = contact_info.value("Friction", 0.0);
-             std::string type_str = contact_info.value("Type", "");
-             
-             std::string master_name, slave_name;
-             
-             if (type_str == "NodeToSurfaceTie" || type_str == "NodeToSurface") {
-                 def.type = Component::ContactType::NodeToSurface;
-                 master_name = contact_info.value("MasterFaces", "");
-                 slave_name = contact_info.value("SlaveNodes", "");
-             } else if (type_str == "SurfaceToSurfaceTie" || type_str == "SurfaceToSurface") {
-                 def.type = Component::ContactType::SurfaceToSurface;
-                 master_name = contact_info.value("MasterFaces", "");
-                 slave_name = contact_info.value("SlaveFaces", "");
-             } else {
-                 def.type = Component::ContactType::Unknown;
-             }
+        for (auto& [contact_name, ci] : j["Contact"].items()) {
+            const entt::entity e = registry.create();
 
-             if (!master_name.empty()) def.master_entity = get_or_create_set_entity(registry, master_name);
-             if (!slave_name.empty()) def.slave_entity = get_or_create_set_entity(registry, slave_name);
+            // --- ContactTypeTag ---
+            const std::string type_str = ci.value("Type", "");
+            const auto inter_type = lookup_enum(kContactTypeMap, type_str,
+                                                Component::ContactInterType::Unknown);
+            registry.emplace<Component::ContactTypeTag>(e, inter_type);
 
-             const entt::entity e = registry.create();
-             registry.emplace<Component::ContactDefinition>(e, std::move(def));
+            // --- ContactBase (master / slave entity handles) ---
+            Component::ContactBase base;
+            base.name = contact_name;
+            std::string master_name, slave_name;
+            if (inter_type == Component::ContactInterType::General) {
+                master_name = ci.value("Surf1", "");
+                slave_name  = ci.value("Surf2", "");
+            } else {
+                master_name = ci.value("MasterFaces", "");
+                slave_name  = ci.value("SlaveNodes", ci.value("SlaveFaces", ""));
+            }
+            if (!master_name.empty()) base.master_entity = get_or_create_set_entity(registry, master_name);
+            if (!slave_name.empty())  base.slave_entity  = get_or_create_set_entity(registry, slave_name);
+            registry.emplace<Component::ContactBase>(e, std::move(base));
+            registry.emplace<Component::SetName>(e, contact_name);
+
+            // --- ContactFormulation ---
+            {
+                Component::ContactFormulation form{};
+                bool has_form = false;
+                if (ci.contains("Formulation")) {
+                    form.formulation = lookup_enum(kFormulationMap,
+                        ci["Formulation"].get<std::string>(),
+                        Component::ContactFormulationType::Standard);
+                    has_form = true;
+                }
+                if (ci.contains("StiffnessFactor")) {
+                    form.stiffness_factor = ci["StiffnessFactor"].get<double>();
+                    has_form = true;
+                }
+                if (ci.contains("DampingCoefficient")) {
+                    form.damping_coefficient = ci["DampingCoefficient"].get<double>();
+                    has_form = true;
+                }
+                if (ci.contains("Damping")) {
+                    form.damping_coefficient = ci["Damping"].get<double>();
+                    has_form = true;
+                }
+                if (ci.contains("InterfaceStiffness")) {
+                    form.interface_stiffness = lookup_enum(kInterfaceStiffnessMap,
+                        ci["InterfaceStiffness"].get<std::string>(),
+                        Component::InterfaceStiffnessType::Default);
+                    has_form = true;
+                }
+                if (ci.contains("StiffnessForm")) {
+                    if (ci["StiffnessForm"].is_number_integer()) {
+                        form.stiffness_form = ci["StiffnessForm"].get<int>();
+                    } else if (ci["StiffnessForm"].is_string()) {
+                        auto it2 = kStiffnessFormMap.find(to_lower_copy(ci["StiffnessForm"].get<std::string>()));
+                        if (it2 != kStiffnessFormMap.end()) form.stiffness_form = it2->second;
+                    }
+                    has_form = true;
+                }
+                if (ci.contains("MinStiffness")) { form.min_stiffness = ci["MinStiffness"].get<double>(); has_form = true; }
+                if (ci.contains("MaxStiffness")) { form.max_stiffness = ci["MaxStiffness"].get<double>(); has_form = true; }
+                if (ci.contains("SearchMethod")) {
+                    form.search_method = lookup_enum(kSearchMethodMap,
+                        ci["SearchMethod"].get<std::string>(),
+                        Component::SearchMethodType::Segment);
+                    has_form = true;
+                }
+                if (ci.contains("SearchDistance")) { form.search_distance = ci["SearchDistance"].get<double>(); has_form = true; }
+                if (has_form) registry.emplace<Component::ContactFormulation>(e, form);
+            }
+
+            // --- ContactFriction ---
+            {
+                Component::ContactFriction fric{};
+                bool has_fric = false;
+                if (ci.contains("FrictionLaw")) {
+                    fric.friction_law = lookup_enum(kFrictionLawMap,
+                        ci["FrictionLaw"].get<std::string>(),
+                        Component::FrictionLawType::Coulomb);
+                    has_fric = true;
+                }
+                if (ci.contains("FrictionCoef")) { fric.friction_coef = ci["FrictionCoef"].get<double>(); has_fric = true; }
+                if (ci.contains("Friction"))     { fric.friction_coef = ci["Friction"].get<double>();     has_fric = true; }
+                if (ci.contains("FrictionCoefs") && ci["FrictionCoefs"].is_array()) {
+                    const auto& arr = ci["FrictionCoefs"];
+                    for (size_t k = 0; k < std::min(arr.size(), size_t(6)); ++k)
+                        fric.friction_coefs[k] = arr[k].get<double>();
+                    has_fric = true;
+                }
+                if (ci.contains("DampingInterStiff")) { fric.damping_inter_stiff = ci["DampingInterStiff"].get<double>(); has_fric = true; }
+                if (ci.contains("DampingInterFric"))  { fric.damping_inter_fric  = ci["DampingInterFric"].get<double>();  has_fric = true; }
+                if (has_fric) registry.emplace<Component::ContactFriction>(e, fric);
+            }
+
+            // --- ContactGapControl ---
+            {
+                Component::ContactGapControl gap{};
+                bool has_gap = false;
+                if (ci.contains("GapFlag")) {
+                    gap.gap_flag = lookup_enum(kGapFlagMap,
+                        ci["GapFlag"].get<std::string>(),
+                        Component::GapFlagType::None);
+                    has_gap = true;
+                }
+                if (ci.contains("GapScale"))      { gap.gap_scale       = ci["GapScale"].get<double>();      has_gap = true; }
+                if (ci.contains("GapMin"))         { gap.gap_min         = ci["GapMin"].get<double>();         has_gap = true; }
+                if (ci.contains("GapMax"))         { gap.gap_max         = ci["GapMax"].get<double>();         has_gap = true; }
+                if (ci.contains("SlaveGapMax"))    { gap.slave_gap_max   = ci["SlaveGapMax"].get<double>();    has_gap = true; }
+                if (ci.contains("MasterGapMax"))   { gap.master_gap_max  = ci["MasterGapMax"].get<double>();   has_gap = true; }
+                if (has_gap) registry.emplace<Component::ContactGapControl>(e, gap);
+            }
+
+            // --- ContactTieData (TYPE2-specific: Ignore, fail mode, curve refs) ---
+            if (inter_type == Component::ContactInterType::Tie) {
+                Component::ContactTieData tie{};
+                if (ci.contains("Ignore")) {
+                    tie.ignore = lookup_enum(kIgnoreMap,
+                        ci["Ignore"].get<std::string>(),
+                        Component::IgnoreType::MainThick);
+                }
+                if (ci.contains("FailMode")) {
+                    tie.fail_mode = lookup_enum(kFailModeMap,
+                        ci["FailMode"].get<std::string>(),
+                        Component::FailModeType::None);
+                }
+                if (ci.contains("RuptureFlag")) {
+                    tie.rupture_flag = lookup_enum(kRuptureFlagMap,
+                        ci["RuptureFlag"].get<std::string>(),
+                        Component::RuptureFlagType::TractionCompress);
+                }
+                if (ci.contains("Max_N_Dist")) tie.max_n_dist = ci["Max_N_Dist"].get<double>();
+                if (ci.contains("Max_T_Dist")) tie.max_t_dist = ci["Max_T_Dist"].get<double>();
+
+                // Curve references (via DofMap)
+                auto resolve_curve = [&](const char* key) -> entt::entity {
+                    if (!ci.contains(key) || !ci[key].is_string()) return entt::null;
+                    std::string cname = ci[key].get<std::string>();
+                    trim(cname);
+                    if (cname.empty() || !dof_map) return entt::null;
+                    auto cit = dof_map->curve_name_to_entity.find(cname);
+                    if (cit != dof_map->curve_name_to_entity.end()) return cit->second;
+                    return get_or_create_curve_entity_by_name(cname);
+                };
+                tie.stress_vs_stress_rate = resolve_curve("StressVsStressRate");
+                tie.nor_stress_vs_disp    = resolve_curve("NorStressVsDisp");
+                tie.tang_stress_vs_disp   = resolve_curve("TangStressVsDisp");
+
+                registry.emplace<Component::ContactTieData>(e, tie);
+            }
+
+            spdlog::info("  -> Contact '{}' (Type={}) created.", contact_name, type_str);
         }
     }
 
@@ -671,6 +878,9 @@ void SimdroidParser::parse_control_json(const std::string& path, DataContext& ct
         spdlog::info("Parsing Analysis Settings...");
         parse_analysis_settings(j["Step"], registry, ctx);
     }
+
+    // Post-parse: validate contact entity references
+    validate_contacts(registry);
 }
 
 entt::entity SimdroidParser::find_set_by_name(entt::registry& registry, const std::string& name) {
@@ -1444,5 +1654,84 @@ void SimdroidParser::parse_mesh_dat(const std::string& path, DataContext& ctx) {
         auto& members = registry.get_or_emplace<Component::SurfaceSetMembers>(e);
         add_to_set(members.members, ranges, surface_lookup);
     }
+}
+
+// =========================================================
+// Post-parse: validate contact master/slave set references
+// =========================================================
+void SimdroidParser::validate_contacts(entt::registry& registry) {
+    auto view = registry.view<const Component::ContactBase>();
+    int warned = 0;
+    for (auto entity : view) {
+        const auto& cb = view.get<const Component::ContactBase>(entity);
+
+        auto check_set = [&](entt::entity se, const char* role) {
+            if (se == entt::null) return;
+            if (!registry.valid(se)) {
+                spdlog::warn("Contact '{}': {} entity is invalid.", cb.name, role);
+                ++warned;
+                return;
+            }
+            const bool has_members =
+                registry.all_of<Component::NodeSetMembers>(se) ||
+                registry.all_of<Component::SurfaceSetMembers>(se) ||
+                registry.all_of<Component::ElementSetMembers>(se);
+            if (!has_members) {
+                spdlog::warn("Contact '{}': {} set '{}' has no member component yet (may be populated later by mesh).",
+                             cb.name, role,
+                             registry.all_of<Component::SetName>(se)
+                                 ? registry.get<Component::SetName>(se).value : "<unnamed>");
+            }
+        };
+
+        check_set(cb.master_entity, "master");
+        check_set(cb.slave_entity,  "slave");
+
+        // Detect nodes that appear in both master and slave sets
+        auto collect_nodes = [&](entt::entity se, std::unordered_set<entt::entity>& out) {
+            if (se == entt::null || !registry.valid(se)) return;
+            if (registry.all_of<Component::NodeSetMembers>(se)) {
+                for (auto n : registry.get<Component::NodeSetMembers>(se).members)
+                    out.insert(n);
+            }
+            if (registry.all_of<Component::SurfaceSetMembers>(se)) {
+                for (auto surf : registry.get<Component::SurfaceSetMembers>(se).members) {
+                    if (!registry.valid(surf)) continue;
+                    if (registry.all_of<Component::SurfaceConnectivity>(surf)) {
+                        for (auto n : registry.get<Component::SurfaceConnectivity>(surf).nodes)
+                            out.insert(n);
+                    }
+                }
+            }
+        };
+
+        std::unordered_set<entt::entity> master_nodes, slave_nodes;
+        collect_nodes(cb.master_entity, master_nodes);
+        collect_nodes(cb.slave_entity,  slave_nodes);
+
+        std::vector<int> overlap_ids;
+        for (auto n : master_nodes) {
+            if (slave_nodes.count(n)) {
+                if (registry.valid(n) && registry.all_of<Component::NodeID>(n))
+                    overlap_ids.push_back(registry.get<Component::NodeID>(n).value);
+            }
+        }
+        if (!overlap_ids.empty()) {
+            std::sort(overlap_ids.begin(), overlap_ids.end());
+            std::string ids_str;
+            for (size_t k = 0; k < std::min(overlap_ids.size(), size_t(10)); ++k) {
+                if (k) ids_str += ", ";
+                ids_str += std::to_string(overlap_ids[k]);
+            }
+            if (overlap_ids.size() > 10) ids_str += ", ...";
+            spdlog::warn("Contact '{}': {} node(s) belong to BOTH master and slave sets [{}]",
+                         cb.name, overlap_ids.size(), ids_str);
+            ++warned;
+        }
+    }
+    if (warned > 0)
+        spdlog::warn("Contact validation: {} issue(s) found.", warned);
+    else
+        spdlog::info("Contact validation: all {} contact(s) OK.", view.size());
 }
 

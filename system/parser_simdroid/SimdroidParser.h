@@ -32,4 +32,7 @@ class SimdroidParser {
         
         // Helper to find a set entity by name
         static entt::entity find_set_by_name(entt::registry& registry, const std::string& name);
+
+        // Post-parse: validate contact entity references
+        static void validate_contacts(entt::registry& registry);
     };

@@ -248,10 +248,10 @@ struct SimdroidInspector {
             };
 
             // Contacts
-            auto view_contacts = registry.view<const Component::ContactDefinition>();
+            auto view_contacts = registry.view<const Component::ContactBase>();
             std::vector<entt::entity> contacts_to_remove;
             for (auto entity : view_contacts) {
-                const auto& contact = view_contacts.get<const Component::ContactDefinition>(entity);
+                const auto& contact = view_contacts.get<const Component::ContactBase>(entity);
                 if (!registry.valid(contact.master_entity) || !registry.valid(contact.slave_entity)
                     || !set_has_any_valid_member(contact.master_entity) || !set_has_any_valid_member(contact.slave_entity)) {
                     contacts_to_remove.push_back(entity);

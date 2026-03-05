@@ -34,9 +34,9 @@ public:
         // -------------------------------------------------------
         // 2. 处理 Contact (显式连接)
         // -------------------------------------------------------
-        auto view_contacts = registry.view<const Component::ContactDefinition>();
+        auto view_contacts = registry.view<const Component::ContactBase>();
         for (auto entity : view_contacts) {
-            const auto& contact = view_contacts.get<const Component::ContactDefinition>(entity);
+            const auto& contact = view_contacts.get<const Component::ContactBase>(entity);
             
             auto master_parts = get_parts_from_set(registry, inspector, contact.master_entity);
             auto slave_parts = get_parts_from_set(registry, inspector, contact.slave_entity);
