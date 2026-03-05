@@ -43,10 +43,55 @@ public:
                 node.material_info = registry.get<Component::MaterialModel>(part.material).value;
             }
 
-            // 获取属性信息 (例如: SolidProperty typeid: 1, HG: eas)
-            if (registry.valid(part.section) && registry.all_of<Component::SolidProperty>(part.section)) {
-                const auto& prop = registry.get<Component::SolidProperty>(part.section);
-                node.property_info = "Type: " + std::to_string(prop.type_id) + ", HG: " + prop.hourglass_control;
+            // 获取属性信息：根据不同 Property 组件生成简短摘要
+            if (registry.valid(part.section)) {
+                const entt::entity sec = part.section;
+                std::string info;
+
+                if (registry.all_of<Component::ShellProperty>(sec)) {
+                    const auto& p = registry.get<Component::ShellProperty>(sec);
+                    info = "Shell: t=[" +
+                           std::to_string(p.thickness[0]) + "," +
+                           std::to_string(p.thickness[1]) + "," +
+                           std::to_string(p.thickness[2]) + "," +
+                           std::to_string(p.thickness[3]) + "], N=" +
+                           std::to_string(p.integration_points);
+                } else if (registry.all_of<Component::BeamProperty>(sec)) {
+                    const auto& p = registry.get<Component::BeamProperty>(sec);
+                    info = "Beam: A=" + std::to_string(p.area) +
+                           ", Iyy=" + std::to_string(p.iyy) +
+                           ", Izz=" + std::to_string(p.izz);
+                } else if (registry.all_of<Component::FiberBeamProperty>(sec)) {
+                    const auto& p = registry.get<Component::FiberBeamProperty>(sec);
+                    info = "FiberBeam: pattern=" + p.pattern +
+                           ", NIP=" + std::to_string(p.integration_points);
+                } else if (registry.all_of<Component::AxialSpringDamperProperty>(sec)) {
+                    const auto& p = registry.get<Component::AxialSpringDamperProperty>(sec);
+                    info = "Spring: K=" + std::to_string(p.stiffness) +
+                           ", C=" + std::to_string(p.damping);
+                } else if (registry.all_of<Component::BeamSpringProperty>(sec)) {
+                    const auto& p = registry.get<Component::BeamSpringProperty>(sec);
+                    info = "BeamSpring: K[0]=" + std::to_string(p.linear_stiffness[0]);
+                } else if (registry.all_of<Component::SolidShCompProperty>(sec)) {
+                    const auto& p = registry.get<Component::SolidShCompProperty>(sec);
+                    info = "SolidShComp: layers=" + std::to_string(p.layer_thicks.size());
+                } else if (registry.all_of<Component::SolidShellProperty>(sec)) {
+                    const auto& p = registry.get<Component::SolidShellProperty>(sec);
+                    info = "SolidShell: Inpts=[" +
+                           std::to_string(p.integration_points[0]) + "," +
+                           std::to_string(p.integration_points[1]) + "," +
+                           std::to_string(p.integration_points[2]) + "]";
+                } else if (registry.all_of<Component::SolidAdvancedProperty>(sec)) {
+                    const auto& p = registry.get<Component::SolidAdvancedProperty>(sec);
+                    info = "Solid: " + p.formulation +
+                           ", ss=" + p.small_strain +
+                           ", h=" + std::to_string(p.visco_hourglass_k);
+                } else if (registry.all_of<Component::SolidProperty>(sec)) {
+                    const auto& prop = registry.get<Component::SolidProperty>(sec);
+                    info = "Type: " + std::to_string(prop.type_id) + ", HG: " + prop.hourglass_control;
+                }
+
+                node.property_info = std::move(info);
             }
         }
 

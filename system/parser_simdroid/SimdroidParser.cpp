@@ -5,6 +5,7 @@
 #include "components/simdroid_components.h"
 #include "components/material_components.h"
 #include "../../data_center/components/load_components.h"
+#include "../../data_center/components/property_components.h"
 #include "../../data_center/DofMap.h"
 #include "../parser_base/string_utils.h"
 #include "nlohmann/json.hpp"
@@ -438,6 +439,18 @@ void SimdroidParser::parse_control_json(const std::string& path, DataContext& ct
         return curve_e;
     };
 
+    auto resolve_curve_entity_by_name = [&](const std::string& raw_name) -> entt::entity {
+        if (!dof_map) return entt::null;
+        std::string fname = raw_name;
+        trim(fname);
+        if (fname.empty()) return entt::null;
+        auto it = dof_map->curve_name_to_entity.find(fname);
+        if (it != dof_map->curve_name_to_entity.end()) {
+            return it->second;
+        }
+        return get_or_create_curve_entity_by_name(fname);
+    };
+
     // 预先根据 Function 块创建对应的 Curve 实体（如果存在）
     if (j.contains("Function") && j["Function"].is_object()) {
         for (auto& [fname, fval] : j["Function"].items()) {
@@ -445,6 +458,369 @@ void SimdroidParser::parse_control_json(const std::string& path, DataContext& ct
             (void)get_or_create_curve_entity_by_name(fname);
         }
         spdlog::info("Simdroid Functions parsed: {} entries mapped to Curve entities.", dof_map->curve_name_to_entity.size());
+    }
+
+    // ---------------------------------------------------------------------
+    // CrossSection: 截面/属性定义 -> Property 实体
+    //  - 使用 SetName = CrossSection 名称
+    //  - 按 Type 附加不同的 Property 组件
+    // ---------------------------------------------------------------------
+    std::unordered_map<std::string, entt::entity> cross_section_map;
+
+    if (j.contains("CrossSection") && j["CrossSection"].is_object()) {
+        for (auto& [cs_name, cs_val] : j["CrossSection"].items()) {
+            const entt::entity cs_entity = registry.create();
+            registry.emplace<Component::SetName>(cs_entity, cs_name);
+            cross_section_map.emplace(cs_name, cs_entity);
+
+            const std::string type_str = cs_val.value("Type", "");
+            const std::string type_l = to_lower_copy(type_str);
+
+            // --- Solid / SolidOrthotropic ---
+            if (type_l == "solid" || type_l == "solidorthotropic") {
+                Component::SolidAdvancedProperty prop{};
+
+                if (cs_val.contains("Formulation") && cs_val["Formulation"].is_array() && !cs_val["Formulation"].empty()) {
+                    prop.formulation = cs_val["Formulation"].front().get<std::string>();
+                }
+                prop.small_strain = cs_val.value("SmallStrain", "");
+                prop.const_pressure = cs_val.value("ConstPressure", "");
+                prop.co_rotation_flag = cs_val.value("CoRotationFlag", "");
+
+                if (cs_val.contains("ViscoHourglassK")) {
+                    prop.visco_hourglass_k = cs_val["ViscoHourglassK"].get<double>();
+                } else if (cs_val.contains("hm")) {
+                    prop.visco_hourglass_k = cs_val["hm"].get<double>();
+                }
+                if (cs_val.contains("QuadraticViscosity")) {
+                    prop.bulk_viscosity.quadratic = cs_val["QuadraticViscosity"].get<double>();
+                }
+                if (cs_val.contains("LinearViscosity")) {
+                    prop.bulk_viscosity.linear = cs_val["LinearViscosity"].get<double>();
+                }
+                if (cs_val.contains("dtmin") && cs_val["dtmin"].is_number()) {
+                    prop.dtmin = cs_val["dtmin"].get<double>();
+                }
+                if (cs_val.contains("DampingNumeri") && cs_val["DampingNumeri"].is_number()) {
+                    prop.numeric_damping = cs_val["DampingNumeri"].get<double>();
+                }
+                if (cs_val.contains("DistortionControl") && cs_val["DistortionControl"].is_boolean()) {
+                    prop.distortion_control = cs_val["DistortionControl"].get<bool>();
+                }
+                if (cs_val.contains("DistortionControlCoeffs") && cs_val["DistortionControlCoeffs"].is_array()) {
+                    const auto& arr = cs_val["DistortionControlCoeffs"];
+                    for (size_t i = 0; i < std::min<std::size_t>(3, arr.size()); ++i) {
+                        prop.distortion_coeffs[i] = arr[i].get<double>();
+                    }
+                }
+                if (cs_val.contains("DispHourglassFactor") && cs_val["DispHourglassFactor"].is_number()) {
+                    prop.disp_hourglass_factor = cs_val["DispHourglassFactor"].get<double>();
+                }
+                if (cs_val.contains("HourglassType") && cs_val["HourglassType"].is_string()) {
+                    prop.hourglass_type = cs_val["HourglassType"].get<std::string>();
+                }
+                if (cs_val.contains("EleCharacLength") && cs_val["EleCharacLength"].is_boolean()) {
+                    prop.ele_charac_length = cs_val["EleCharacLength"].get<bool>();
+                }
+
+                registry.emplace<Component::SolidAdvancedProperty>(cs_entity, std::move(prop));
+            }
+            // --- Shell / SandwichShell ---
+            else if (type_l == "shell" || type_l == "sandwichshell") {
+                Component::ShellProperty prop{};
+                prop.type_id = (type_l == "shell") ? 1 : 11;
+
+                if (cs_val.contains("Thickness") && cs_val["Thickness"].is_array()) {
+                    const auto& arr = cs_val["Thickness"];
+                    for (size_t i = 0; i < std::min<std::size_t>(4, arr.size()); ++i) {
+                        prop.thickness[i] = arr[i].get<double>();
+                    }
+                }
+                if (cs_val.contains("ThicknessChange") && cs_val["ThicknessChange"].is_boolean()) {
+                    prop.thickness_change = cs_val["ThicknessChange"].get<bool>();
+                }
+                if (cs_val.contains("DrillDof") && cs_val["DrillDof"].is_boolean()) {
+                    prop.drill_dof = cs_val["DrillDof"].get<bool>();
+                }
+                if (cs_val.contains("ShearFactor") && cs_val["ShearFactor"].is_number()) {
+                    prop.shear_factor = cs_val["ShearFactor"].get<double>();
+                }
+                if (cs_val.contains("InpNum") && cs_val["InpNum"].is_number_integer()) {
+                    prop.integration_points = cs_val["InpNum"].get<int>();
+                }
+                if (cs_val.contains("InpRule") && cs_val["InpRule"].is_string()) {
+                    prop.inp_rule = cs_val["InpRule"].get<std::string>();
+                }
+                if (cs_val.contains("FailThick") && cs_val["FailThick"].is_number()) {
+                    prop.fail_thick = cs_val["FailThick"].get<double>();
+                }
+                if (cs_val.contains("HourglassCofs") && cs_val["HourglassCofs"].is_array()) {
+                    const auto& arr = cs_val["HourglassCofs"];
+                    for (size_t i = 0; i < std::min<std::size_t>(3, arr.size()); ++i) {
+                        prop.hourglass_coefs[i] = arr[i].get<double>();
+                    }
+                }
+                if (cs_val.contains("PlasticPlaneStressReturn") && cs_val["PlasticPlaneStressReturn"].is_string()) {
+                    prop.plastic_plane_stress_return = cs_val["PlasticPlaneStressReturn"].get<std::string>();
+                }
+                if (cs_val.contains("MidShellFlag") && cs_val["MidShellFlag"].is_string()) {
+                    prop.mid_shell_flag = cs_val["MidShellFlag"].get<std::string>();
+                }
+
+                registry.emplace<Component::ShellProperty>(cs_entity, std::move(prop));
+            }
+            // --- SolidShell / SolidShComp (厚壳 / 复合厚壳) ---
+            else if (type_l == "solidshell") {
+                Component::SolidShellProperty prop{};
+                if (cs_val.contains("Formulation") && cs_val["Formulation"].is_string()) {
+                    prop.formulation.value = cs_val["Formulation"].get<std::string>();
+                }
+                if (cs_val.contains("SmallStrain") && cs_val["SmallStrain"].is_string()) {
+                    prop.small_strain.value = cs_val["SmallStrain"].get<std::string>();
+                }
+                if (cs_val.contains("InpNum") && cs_val["InpNum"].is_array()) {
+                    const auto& arr = cs_val["InpNum"];
+                    for (size_t i = 0; i < std::min<std::size_t>(3, arr.size()); ++i) {
+                        prop.integration_points[i] = arr[i].get<int>();
+                    }
+                }
+                if (cs_val.contains("ViscoHourglassK") && cs_val["ViscoHourglassK"].is_number()) {
+                    prop.visco_hourglass_k = cs_val["ViscoHourglassK"].get<double>();
+                }
+                if (cs_val.contains("QuadraticViscosity") && cs_val["QuadraticViscosity"].is_number()) {
+                    prop.bulk_viscosity.quadratic = cs_val["QuadraticViscosity"].get<double>();
+                }
+                if (cs_val.contains("LinearViscosity") && cs_val["LinearViscosity"].is_number()) {
+                    prop.bulk_viscosity.linear = cs_val["LinearViscosity"].get<double>();
+                }
+                if (cs_val.contains("dtmin") && cs_val["dtmin"].is_number()) {
+                    prop.dtmin = cs_val["dtmin"].get<double>();
+                }
+                if (cs_val.contains("ThicknessPenaltyFactor") && cs_val["ThicknessPenaltyFactor"].is_number()) {
+                    prop.thickness_penalty = cs_val["ThicknessPenaltyFactor"].get<double>();
+                }
+                if (cs_val.contains("DistortionControlCoeffs") && cs_val["DistortionControlCoeffs"].is_array()) {
+                    const auto& arr = cs_val["DistortionControlCoeffs"];
+                    for (size_t i = 0; i < std::min<std::size_t>(3, arr.size()); ++i) {
+                        prop.distortion_coeffs[i] = arr[i].get<double>();
+                    }
+                }
+                registry.emplace<Component::SolidShellProperty>(cs_entity, std::move(prop));
+            }
+            else if (type_l == "solidshcomp") {
+                Component::SolidShCompProperty prop{};
+                if (cs_val.contains("Formulation") && cs_val["Formulation"].is_string()) {
+                    prop.formulation.value = cs_val["Formulation"].get<std::string>();
+                }
+                if (cs_val.contains("SmallStrain") && cs_val["SmallStrain"].is_string()) {
+                    prop.small_strain.value = cs_val["SmallStrain"].get<std::string>();
+                }
+                if (cs_val.contains("InpNum") && cs_val["InpNum"].is_array()) {
+                    const auto& arr = cs_val["InpNum"];
+                    for (size_t i = 0; i < std::min<std::size_t>(3, arr.size()); ++i) {
+                        prop.integration_points[i] = arr[i].get<int>();
+                    }
+                }
+                if (cs_val.contains("DampingNumeri") && cs_val["DampingNumeri"].is_number()) {
+                    prop.numeric_damping = cs_val["DampingNumeri"].get<double>();
+                }
+                if (cs_val.contains("QuadraticViscosity") && cs_val["QuadraticViscosity"].is_number()) {
+                    prop.bulk_viscosity.quadratic = cs_val["QuadraticViscosity"].get<double>();
+                }
+                if (cs_val.contains("LinearViscosity") && cs_val["LinearViscosity"].is_number()) {
+                    prop.bulk_viscosity.linear = cs_val["LinearViscosity"].get<double>();
+                }
+                if (cs_val.contains("ThicknessPenaltyFactor") && cs_val["ThicknessPenaltyFactor"].is_number()) {
+                    prop.thickness_penalty = cs_val["ThicknessPenaltyFactor"].get<double>();
+                }
+                if (cs_val.contains("CoordSys") && cs_val["CoordSys"].is_string()) {
+                    prop.coord_sys.value = cs_val["CoordSys"].get<std::string>();
+                }
+                if (cs_val.contains("Angles") && cs_val["Angles"].is_array()) {
+                    prop.layer_angles = cs_val["Angles"].get<std::vector<double>>();
+                }
+                if (cs_val.contains("Thicks") && cs_val["Thicks"].is_array()) {
+                    prop.layer_thicks = cs_val["Thicks"].get<std::vector<double>>();
+                }
+                if (cs_val.contains("Positions") && cs_val["Positions"].is_array()) {
+                    prop.layer_positions = cs_val["Positions"].get<std::vector<double>>();
+                }
+                if (cs_val.contains("Materials") && cs_val["Materials"].is_array()) {
+                    prop.layer_materials = cs_val["Materials"].get<std::vector<std::string>>();
+                }
+                if (cs_val.contains("PositionFlag") && cs_val["PositionFlag"].is_array()) {
+                    prop.position_flags = cs_val["PositionFlag"].get<std::vector<std::string>>();
+                }
+                registry.emplace<Component::SolidShCompProperty>(cs_entity, std::move(prop));
+            }
+            // --- Beam / FiberBeam / Cohesive / Springs ---
+            else if (type_l == "generalbeam" || type_l == "beam") {
+                Component::BeamProperty prop{};
+                if (cs_val.contains("SmallStrain") && cs_val["SmallStrain"].is_string()) {
+                    prop.small_strain.value = cs_val["SmallStrain"].get<std::string>();
+                }
+                if (cs_val.contains("Area") && cs_val["Area"].is_number()) {
+                    prop.area = cs_val["Area"].get<double>();
+                }
+                if (cs_val.contains("Ixx") && cs_val["Ixx"].is_number()) {
+                    prop.ixx = cs_val["Ixx"].get<double>();
+                }
+                if (cs_val.contains("Iyy") && cs_val["Iyy"].is_number()) {
+                    prop.iyy = cs_val["Iyy"].get<double>();
+                }
+                if (cs_val.contains("Izz") && cs_val["Izz"].is_number()) {
+                    prop.izz = cs_val["Izz"].get<double>();
+                }
+                if (cs_val.contains("ShearFlag") && cs_val["ShearFlag"].is_boolean()) {
+                    prop.shear_flag = cs_val["ShearFlag"].get<bool>();
+                }
+                registry.emplace<Component::BeamProperty>(cs_entity, std::move(prop));
+            }
+            else if (type_l == "fiberbeam") {
+                Component::FiberBeamProperty prop{};
+                if (cs_val.contains("Pattern") && cs_val["Pattern"].is_string()) {
+                    prop.pattern = cs_val["Pattern"].get<std::string>();
+                }
+                if (cs_val.contains("SmallStrain") && cs_val["SmallStrain"].is_string()) {
+                    prop.small_strain.value = cs_val["SmallStrain"].get<std::string>();
+                }
+                if (cs_val.contains("InpNum") && cs_val["InpNum"].is_number_integer()) {
+                    prop.integration_points = cs_val["InpNum"].get<int>();
+                }
+                if (cs_val.contains("Yi") && cs_val["Yi"].is_array()) {
+                    prop.yi = cs_val["Yi"].get<std::vector<double>>();
+                }
+                if (cs_val.contains("Zi") && cs_val["Zi"].is_array()) {
+                    prop.zi = cs_val["Zi"].get<std::vector<double>>();
+                }
+                if (cs_val.contains("Areai") && cs_val["Areai"].is_array()) {
+                    prop.areai = cs_val["Areai"].get<std::vector<double>>();
+                }
+                if (cs_val.contains("Dj") && cs_val["Dj"].is_array()) {
+                    prop.dj = cs_val["Dj"].get<std::vector<double>>();
+                }
+                registry.emplace<Component::FiberBeamProperty>(cs_entity, std::move(prop));
+            }
+            else if (type_l == "cohesive") {
+                Component::CohesiveProperty prop{};
+                if (cs_val.contains("SmallStrain") && cs_val["SmallStrain"].is_string()) {
+                    prop.small_strain.value = cs_val["SmallStrain"].get<std::string>();
+                }
+                if (cs_val.contains("Thickness") && cs_val["Thickness"].is_number()) {
+                    prop.thickness = cs_val["Thickness"].get<double>();
+                }
+                registry.emplace<Component::CohesiveProperty>(cs_entity, std::move(prop));
+            }
+            else if (type_l == "axialspringdamper") {
+                Component::AxialSpringDamperProperty prop{};
+                if (cs_val.contains("Mass") && cs_val["Mass"].is_number()) {
+                    prop.mass = cs_val["Mass"].get<double>();
+                }
+                if (cs_val.contains("Stiffness") && cs_val["Stiffness"].is_number()) {
+                    prop.stiffness = cs_val["Stiffness"].get<double>();
+                }
+                if (cs_val.contains("DampingCoefficient") && cs_val["DampingCoefficient"].is_number()) {
+                    prop.damping = cs_val["DampingCoefficient"].get<double>();
+                }
+                if (cs_val.contains("NonlinearSpring") && cs_val["NonlinearSpring"].is_boolean()) {
+                    prop.nonlinear_spring = cs_val["NonlinearSpring"].get<bool>();
+                }
+                if (cs_val.contains("NonlinearDamper") && cs_val["NonlinearDamper"].is_boolean()) {
+                    prop.nonlinear_damper = cs_val["NonlinearDamper"].get<bool>();
+                }
+                if (cs_val.contains("HardeningFlag") && cs_val["HardeningFlag"].is_string()) {
+                    prop.hardening_flag = cs_val["HardeningFlag"].get<std::string>();
+                }
+                if (cs_val.contains("Load_DeflectionCurve") && cs_val["Load_DeflectionCurve"].is_string()) {
+                    prop.stiffness_curve = resolve_curve_entity_by_name(cs_val["Load_DeflectionCurve"].get<std::string>());
+                }
+                if (cs_val.contains("DampingCurve") && cs_val["DampingCurve"].is_string()) {
+                    prop.damping_curve = resolve_curve_entity_by_name(cs_val["DampingCurve"].get<std::string>());
+                }
+                registry.emplace<Component::AxialSpringDamperProperty>(cs_entity, std::move(prop));
+            }
+            else if (type_l == "beamspring") {
+                Component::BeamSpringProperty prop{};
+                if (cs_val.contains("Mass") && cs_val["Mass"].is_number()) {
+                    prop.mass = cs_val["Mass"].get<double>();
+                }
+                if (cs_val.contains("Inertia") && cs_val["Inertia"].is_number()) {
+                    prop.inertia = cs_val["Inertia"].get<double>();
+                }
+                if (cs_val.contains("CoordSys") && cs_val["CoordSys"].is_string()) {
+                    prop.coord_sys.value = cs_val["CoordSys"].get<std::string>();
+                }
+                if (cs_val.contains("FailureCriteria") && cs_val["FailureCriteria"].is_string()) {
+                    prop.failure_criteria = cs_val["FailureCriteria"].get<std::string>();
+                }
+                if (cs_val.contains("LengthFlag") && cs_val["LengthFlag"].is_string()) {
+                    prop.length_flag = cs_val["LengthFlag"].get<std::string>();
+                }
+                if (cs_val.contains("FailureModel") && cs_val["FailureModel"].is_string()) {
+                    prop.failure_model = cs_val["FailureModel"].get<std::string>();
+                }
+
+                auto fill_array_double = [&](const char* key, std::array<double, 6>& dst) {
+                    if (!cs_val.contains(key) || !cs_val[key].is_array()) return;
+                    const auto& arr = cs_val[key];
+                    for (size_t i = 0; i < std::min<std::size_t>(6, arr.size()); ++i) {
+                        dst[i] = arr[i].get<double>();
+                    }
+                };
+                auto fill_array_string = [&](const char* key, std::array<std::string, 6>& dst) {
+                    if (!cs_val.contains(key) || !cs_val[key].is_array()) return;
+                    const auto& arr = cs_val[key];
+                    for (size_t i = 0; i < std::min<std::size_t>(6, arr.size()); ++i) {
+                        if (arr[i].is_string()) dst[i] = arr[i].get<std::string>();
+                    }
+                };
+                auto fill_array_curve = [&](const char* key, std::array<entt::entity, 6>& dst) {
+                    if (!cs_val.contains(key) || !cs_val[key].is_array()) return;
+                    const auto& arr = cs_val[key];
+                    for (size_t i = 0; i < std::min<std::size_t>(6, arr.size()); ++i) {
+                        if (arr[i].is_string()) {
+                            dst[i] = resolve_curve_entity_by_name(arr[i].get<std::string>());
+                        }
+                    }
+                };
+
+                fill_array_double("LinearStiffness", prop.linear_stiffness);
+                fill_array_double("LinearDamping", prop.linear_damping);
+                fill_array_double("NonStiffFacA", prop.non_stiff_fac_a);
+                fill_array_double("NonStiffFacB", prop.non_stiff_fac_b);
+                fill_array_double("NonStiffFacD", prop.non_stiff_fac_d);
+                fill_array_string("HardeningFlag", prop.hardening_flag);
+
+                fill_array_curve("NonlinearStiffness", prop.nonlinear_stiffness);
+                fill_array_curve("ForOrMomWithVelCurve", prop.for_or_mom_with_vel);
+                fill_array_curve("HardenRelatedCurve", prop.harden_related_curve);
+                fill_array_curve("NonlinearDamping", prop.nonlinear_damping);
+
+                fill_array_double("UpperFailureLimit", prop.upper_failure_limit);
+                fill_array_double("LowerFailureLimit", prop.lower_failure_limit);
+                fill_array_double("AbscScaleDamp", prop.absc_scale_damp);
+                fill_array_double("OrdinaScaleDamp", prop.ordina_scale_damp);
+                fill_array_double("AbscScaleStiff", prop.absc_scale_stiff);
+                fill_array_double("OrdinaScaleStiff", prop.ordina_scale_stiff);
+
+                if (cs_val.contains("RefTranVel") && cs_val["RefTranVel"].is_number()) {
+                    prop.ref_tran_vel = cs_val["RefTranVel"].get<double>();
+                }
+                if (cs_val.contains("RefRotVel") && cs_val["RefRotVel"].is_number()) {
+                    prop.ref_rot_vel = cs_val["RefRotVel"].get<double>();
+                }
+                if (cs_val.contains("SmoothStrRate") && cs_val["SmoothStrRate"].is_boolean()) {
+                    prop.smooth_strain_rate = cs_val["SmoothStrRate"].get<bool>();
+                }
+                fill_array_double("RelaVecCoeff", prop.rela_vec_coeff);
+                fill_array_double("RelaVecExp", prop.rela_vec_exp);
+                fill_array_double("FailureScale", prop.failure_scale);
+                fill_array_double("FailureExp", prop.failure_exp);
+
+                registry.emplace<Component::BeamSpringProperty>(cs_entity, std::move(prop));
+            }
+            // 其它类型暂不做细化，仅保留 SetName 以便后续扩展
+        }
     }
 
     if (j.contains("Material") && j["Material"].is_object()) {
@@ -672,6 +1048,7 @@ void SimdroidParser::parse_control_json(const std::string& path, DataContext& ct
             std::string title = part_info.value("Title", part_key);
             std::string ele_set_name = part_info.value("EleSet", "");
             std::string mat_name = part_info.value("Material", "");
+            std::string cs_name  = part_info.value("CrossSection", "");
 
             entt::entity ele_set_entity = entt::null;
             if (!ele_set_name.empty()) {
@@ -690,12 +1067,25 @@ void SimdroidParser::parse_control_json(const std::string& path, DataContext& ct
                 }
             }
 
+            entt::entity section_entity = entt::null;
+            if (!cs_name.empty()) {
+                auto cs_it = cross_section_map.find(cs_name);
+                if (cs_it != cross_section_map.end()) {
+                    section_entity = cs_it->second;
+                } else {
+                    // 退化情况：CrossSection 块缺失，但 PartProperty 引用了名称
+                    section_entity = registry.create();
+                    registry.emplace<Component::SetName>(section_entity, cs_name);
+                    cross_section_map.emplace(cs_name, section_entity);
+                }
+            }
+
             const entt::entity part_entity = registry.create();
             Component::SimdroidPart part;
             part.name = std::move(title);
             part.element_set = ele_set_entity;
             part.material = mat_entity;
-            part.section = entt::null;
+            part.section = section_entity;
             registry.emplace<Component::SimdroidPart>(part_entity, std::move(part));
         }
     }
