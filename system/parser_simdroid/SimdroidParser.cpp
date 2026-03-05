@@ -1839,10 +1839,15 @@ void SimdroidParser::validate_cross_constraints(entt::registry& registry) {
 
     // 1) Contact 定义
     {
-        auto view = registry.view<const Component::ContactBase>();
+        auto view = registry.view<const Component::ContactBase, const Component::ContactTypeTag>();
         for (auto entity : view) {
             const auto& cb = view.get<const Component::ContactBase>(entity);
+            const auto& ct = view.get<const Component::ContactTypeTag>(entity);
             const std::string& def_name = cb.name;
+
+            // GeneralContact 自接触：Surf2 留空 (slave_entity == null) 时不参与 master/slave 冲突检测
+            if (ct.type == Component::ContactInterType::General && cb.slave_entity == entt::null)
+                continue;
 
             std::vector<entt::entity> m_nodes, s_nodes;
             collect_nodes_from_set(cb.master_entity, m_nodes);
@@ -1887,43 +1892,54 @@ void SimdroidParser::validate_cross_constraints(entt::registry& registry) {
 
     // 4) 检测冲突：同一节点既是某定义的 master 又是另一定义的 slave
     int conflict_count = 0;
+    std::unordered_set<std::string> conflict_defs;
     for (auto& [node_e, role] : node_roles) {
         if (role.as_master.empty() || role.as_slave.empty()) continue;
         if (!registry.valid(node_e)) continue;
 
-        int nid = registry.all_of<Component::NodeID>(node_e)
-                      ? registry.get<Component::NodeID>(node_e).value : -1;
-
-        std::string m_str, s_str;
-        for (size_t i = 0; i < std::min(role.as_master.size(), size_t(3)); ++i) {
-            if (i) m_str += ", ";
-            m_str += role.as_master[i];
-        }
-        if (role.as_master.size() > 3) m_str += ", ...";
-        for (size_t i = 0; i < std::min(role.as_slave.size(), size_t(3)); ++i) {
-            if (i) s_str += ", ";
-            s_str += role.as_slave[i];
-        }
-        if (role.as_slave.size() > 3) s_str += ", ...";
-
-        spdlog::warn("Node {} is master in [{}] AND slave in [{}]", nid, m_str, s_str);
         ++conflict_count;
+        for (const auto& name : role.as_master) conflict_defs.insert(name);
+        for (const auto& name : role.as_slave)  conflict_defs.insert(name);
     }
 
-    if (conflict_count > 0)
-        spdlog::warn("Cross-constraint validation: {} node(s) with conflicting master/slave roles.", conflict_count);
-    else
+    if (conflict_count > 0) {
+        // 汇总级别的告警，避免对每个节点逐条输出
+        std::vector<std::string> def_list;
+        def_list.reserve(conflict_defs.size());
+        for (const auto& name : conflict_defs) def_list.push_back(name);
+        std::sort(def_list.begin(), def_list.end());
+
+        std::string defs_str;
+        const size_t max_show = 10;
+        for (size_t i = 0; i < std::min(def_list.size(), max_show); ++i) {
+            if (i) defs_str += ", ";
+            defs_str += def_list[i];
+        }
+        if (def_list.size() > max_show) defs_str += ", ...";
+
+        spdlog::warn(
+            "Cross-constraint validation: {} node(s) with conflicting master/slave roles; affected definitions include [{}].",
+            conflict_count, defs_str);
+    } else {
         spdlog::info("Cross-constraint validation: no master/slave conflicts detected.");
+    }
 }
 
 // =========================================================
 // Post-parse: validate contact master/slave set references
 // =========================================================
 void SimdroidParser::validate_contacts(entt::registry& registry) {
-    auto view = registry.view<const Component::ContactBase>();
+    auto view = registry.view<const Component::ContactBase, const Component::ContactTypeTag>();
     int warned = 0;
+    int total = 0;
     for (auto entity : view) {
+        ++total;
         const auto& cb = view.get<const Component::ContactBase>(entity);
+        const auto& ct = view.get<const Component::ContactTypeTag>(entity);
+
+        // GeneralContact 自接触：Surf2 留空 (slave_entity == null) 时跳过 master/slave 校验
+        if (ct.type == Component::ContactInterType::General && cb.slave_entity == entt::null)
+            continue;
 
         auto check_set = [&](entt::entity se, const char* role) {
             if (se == entt::null) return;
@@ -1992,6 +2008,6 @@ void SimdroidParser::validate_contacts(entt::registry& registry) {
     if (warned > 0)
         spdlog::warn("Contact validation: {} issue(s) found.", warned);
     else
-        spdlog::info("Contact validation: all {} contact(s) OK.", view.size());
+        spdlog::info("Contact validation: all {} contact(s) OK.", total);
 }
 
