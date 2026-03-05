@@ -186,15 +186,16 @@ namespace Component {
     // entt::entity handles, enabling flexible and memory-efficient references.
 
     /**
-     * @brief [新] 附加到 Element 实体，指向其关联的 Property 实体
-     * @details 用于 Plan B 架构：Element 通过此组件引用 Property，
-     * Property 再通过 MaterialRef 引用 Material。
+     * @brief [新] 附加到 Element 实体，指向其关联的 Property（截面）实体
+     * @details 截面参数（积分、沙漏等）由此获取；材料通过 SimdroidPart 绑定，
+     * 由 TopologyData.element_uid_to_part_map 得到 Part 后取 part.material。
      * 
-     * 使用示例：
-     *   auto property_entity = registry.get<Component::PropertyRef>(element_entity).property_entity;
-     *   const auto& property = registry.get<Component::SolidProperty>(property_entity);
-     *   auto material_entity = registry.get<Component::MaterialRef>(property_entity).material_entity;
-     *   const auto& material = registry.get<Component::LinearElasticParams>(material_entity);
+     * 使用示例（截面）：
+     *   auto section_entity = registry.get<Component::PropertyRef>(element_entity).property_entity;
+     *   const auto& property = registry.get<Component::SolidProperty>(section_entity);
+     * 使用示例（材料，需 TopologyData 与 Part）：
+     *   auto part_entity = topology.element_uid_to_part_map[eid];
+     *   entt::entity material_entity = registry.get<Component::SimdroidPart>(part_entity).material;
      */
     struct PropertyRef {
         entt::entity property_entity;

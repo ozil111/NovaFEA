@@ -276,15 +276,17 @@ hyperFEM_app
 
 ```
 Element 实体
-  ├─ Component::OriginalID (eid)
+  ├─ Component::ElementID (eid)
   ├─ Component::ElementType (etype)
   ├─ Component::Connectivity (nids[])
-  └─ Component::PropertyRef ───→ Property 实体
-                                   ├─ Component::OriginalID (pid)
-                                   ├─ Component::SolidProperty
-                                   └─ Component::MaterialRef ───→ Material 实体
-                                                                   ├─ Component::OriginalID (mid)
-                                                                   └─ Component::LinearElasticParams
+  └─ Component::PropertyRef ───→ Property 实体（截面/积分）
+                                   ├─ Component::PropertyID (pid)
+                                   └─ Component::SolidProperty
+
+SimdroidPart（绑定器）: element_set + section(Property) + material
+TopologyData.element_uid_to_part_map[eid] ───→ Part 实体 ───→ Material 实体
+                                                                 ├─ Component::MaterialID (mid)
+                                                                 └─ Component::LinearElasticParams
 ```
 
 这种设计的优势：

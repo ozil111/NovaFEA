@@ -15,9 +15,11 @@
 #include "material/mat1/LinearElasticMatrixSystem.h"
 #include "element/c3d8r/C3D8RStiffnessMatrix.h"
 #include "assemble/AssemblySystem.h"
+#include "TopologyData.h"
 #include "components/mesh_components.h"
 #include "components/material_components.h"
 #include "components/property_components.h"
+#include "components/simdroid_components.h"
 
 // Test fixture for creating a simple test mesh
 class AssemblySystemTest : public ::testing::Test {
@@ -64,16 +66,35 @@ protected:
             2,        // integration_network
             "eas"     // hourglass_control
         );
-        registry.emplace<Component::MaterialRef>(property_entity, material_entity);
-        
+
         // Create element (C3D8R)
         element_entity = registry.create();
+        registry.emplace<Component::ElementID>(element_entity, 1);
         registry.emplace<Component::ElementType>(element_entity, 308); // C3D8R
         registry.emplace<Component::PropertyRef>(element_entity, property_entity);
-        
+
         Component::Connectivity conn;
         conn.nodes = node_entities; // 8 nodes
         registry.emplace<Component::Connectivity>(element_entity, std::move(conn));
+
+        // Part 绑定 几何/截面/材料，TopologyData 提供 element_uid_to_part_map
+        entt::entity ele_set_entity = registry.create();
+        registry.emplace<Component::SetName>(ele_set_entity, "Part_1");
+        auto& set_members = registry.emplace<Component::ElementSetMembers>(ele_set_entity);
+        set_members.members.push_back(element_entity);
+
+        entt::entity part_entity = registry.create();
+        Component::SimdroidPart part;
+        part.name = "Part_1";
+        part.element_set = ele_set_entity;
+        part.material = material_entity;
+        part.section = property_entity;
+        registry.emplace<Component::SimdroidPart>(part_entity, std::move(part));
+
+        auto topology_ptr = std::make_unique<TopologyData>();
+        topology_ptr->reserve_simdroid_maps(1, 8);
+        topology_ptr->element_uid_to_part_map[1] = part_entity;
+        registry.ctx().emplace<std::unique_ptr<TopologyData>>(std::move(topology_ptr));
     }
     
     void TearDown() override {

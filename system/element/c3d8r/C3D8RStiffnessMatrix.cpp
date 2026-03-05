@@ -7,8 +7,9 @@
  * Author: Xiaotong Wang (or hyperFEM Team)
  */
 #include "C3D8RStiffnessMatrix.h"
+#include "../../../data_center/TopologyData.h"
 #include "../../../data_center/components/mesh_components.h"
-#include "../../../data_center/components/property_components.h"
+#include "../../../data_center/components/simdroid_components.h"
 #include "../../../data_center/components/material_components.h"
 #include "spdlog/spdlog.h"
 #include <cmath>
@@ -720,39 +721,37 @@ Eigen::Matrix<double, 24, 24> compute_c3d8r_stiffness_matrix(
     entt::registry& registry,
     entt::entity element_entity
 ) {
-    // 获取材料 D 矩阵
-    if (!registry.all_of<Component::PropertyRef>(element_entity)) {
-        throw std::runtime_error("Element entity missing PropertyRef component");
+    // 通过 Part 获取材料 D 矩阵（element -> TopologyData -> Part -> material）
+    if (!registry.all_of<Component::ElementID>(element_entity)) {
+        throw std::runtime_error("Element entity missing ElementID component");
     }
-    
-    const auto& property_ref = registry.get<Component::PropertyRef>(element_entity);
-    entt::entity property_entity = property_ref.property_entity;
-    
-    if (!registry.all_of<Component::MaterialRef>(property_entity)) {
-        throw std::runtime_error("Property entity missing MaterialRef component");
+    if (!registry.ctx().contains<std::unique_ptr<TopologyData>>()) {
+        throw std::runtime_error("TopologyData not found. Run topology extraction and ensure SimdroidPart are built.");
     }
-    
-    const auto& material_ref = registry.get<Component::MaterialRef>(property_entity);
-    entt::entity material_entity = material_ref.material_entity;
-    
+    auto& topology = *registry.ctx().get<std::unique_ptr<TopologyData>>();
+    int eid = registry.get<Component::ElementID>(element_entity).value;
+    if (eid < 0 || static_cast<size_t>(eid) >= topology.element_uid_to_part_map.size()) {
+        throw std::runtime_error("Element ID out of range for element_uid_to_part_map");
+    }
+    entt::entity part_entity = topology.element_uid_to_part_map[static_cast<size_t>(eid)];
+    if (part_entity == entt::null || !registry.all_of<Component::SimdroidPart>(part_entity)) {
+        throw std::runtime_error("No Part found for element");
+    }
+    entt::entity material_entity = registry.get<Component::SimdroidPart>(part_entity).material;
+
     if (!registry.all_of<Component::LinearElasticMatrix>(material_entity)) {
         throw std::runtime_error("Material entity missing LinearElasticMatrix component. "
                                 "Please call LinearElasticMatrixSystem::compute_linear_elastic_matrix() first.");
     }
-    
     const auto& material_matrix = registry.get<Component::LinearElasticMatrix>(material_entity);
     if (!material_matrix.is_initialized) {
         throw std::runtime_error("Material D matrix not initialized. "
                                 "Please call LinearElasticMatrixSystem::compute_linear_elastic_matrix() first.");
     }
-    
     const Eigen::Matrix<double, 6, 6>& D = material_matrix.D;
-    
-    // 调用新版本函数
+
     Eigen::MatrixXd Ke_buffer;
     compute_c3d8r_stiffness_matrix(registry, element_entity, D, Ke_buffer);
-    
-    // 返回固定大小矩阵
     return Eigen::Matrix<double, 24, 24>(Ke_buffer);
 }
 

@@ -5,13 +5,13 @@
 
 namespace Component {
 
-    // 1. Simdroid 特有的 Part 定义
-    // Python中的 Part 在这里是一个 Entity，包含 ElementSet 的引用
+    // 1. Simdroid 特有的 Part 定义（绑定器：几何 + 截面 + 材料）
+    // Python 中的 Part 在这里是一个 Entity，连接 ElementSet、Property、Material
     struct SimdroidPart {
         std::string name;
-        entt::entity element_set; // 指向包含该 Part 所有单元的 Set
-        entt::entity material;    // 指向材料实体
-        entt::entity section;     // 指向截面属性实体
+        entt::entity element_set; // 几何范围（单元集）
+        entt::entity material;    // 指向 Material 实体
+        entt::entity section;     // 指向 Property（截面属性）实体
     };
 
     // 2. 接触定义 (用于构建连接图)

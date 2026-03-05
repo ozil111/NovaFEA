@@ -11,8 +11,8 @@
 创建了新的组件定义文件：
 
 1. **`data_center/components/property_components.h`**
-   - `Component::SolidProperty` - 固体单元属性
-   - `Component::MaterialRef` - Property 到 Material 的引用
+   - `Component::SolidProperty` - 固体单元截面/积分属性（与 Material 解耦）
+   - 材料通过 `SimdroidPart` 绑定，见 `simdroid_components.h`
 
 2. **`data_center/components/load_components.h`**
    - `Component::NodalLoad` - 节点载荷定义
@@ -86,14 +86,15 @@
 
 2. **灵活性**
    - 轻松修改材料参数：只需更新一个 Material 实体
-   - 支持复杂的层级关系：Element → Property → Material
+   - 以 Part 为纽带：Element（通过 TopologyData）→ Part → Material / Property（截面）
    - 未来易于扩展：如添加 Shell Property, Beam Property 等
 
 3. **查询效率**
    ```cpp
-   // 示例：获取 Element 的材料参数
-   auto prop_entity = registry.get<Component::PropertyRef>(elem_entity).property_entity;
-   auto mat_entity = registry.get<Component::MaterialRef>(prop_entity).material_entity;
+   // 示例：获取 Element 的材料参数（通过 Part）
+   auto& topology = *registry.ctx().get<std::unique_ptr<TopologyData>>();
+   entt::entity part_entity = topology.element_uid_to_part_map[eid];
+   entt::entity mat_entity = registry.get<Component::SimdroidPart>(part_entity).material;
    const auto& mat = registry.get<Component::LinearElasticParams>(mat_entity);
    ```
 

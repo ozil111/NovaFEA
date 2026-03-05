@@ -9,8 +9,9 @@
 #include "AssemblySystem.h"
 #include "../element/c3d8r/C3D8RStiffnessMatrix.h"
 #include "../../data_center/DofMap.h"
+#include "../../data_center/TopologyData.h"
 #include "../../data_center/components/mesh_components.h"
-#include "../../data_center/components/property_components.h"
+#include "../../data_center/components/simdroid_components.h"
 #include "../../data_center/components/material_components.h"
 #include "spdlog/spdlog.h"
 
@@ -30,21 +31,28 @@ bool AssemblySystem::compute_element_stiffness_dispatcher(
     
     int type_id = registry.get<Component::ElementType>(element_entity).type_id;
 
-    // B. 准备数据：获取 D 矩阵（避免在 Kernel 中重复查找）
+    // B. 准备数据：通过 Part 获取材料 D 矩阵（element -> TopologyData -> Part -> material）
     // -----------------------------------------------------
-    if (!registry.all_of<Component::PropertyRef>(element_entity)) {
-        spdlog::error("Element entity missing PropertyRef component");
+    if (!registry.all_of<Component::ElementID>(element_entity)) {
+        spdlog::error("Element entity missing ElementID component");
         return false;
     }
-    
-    auto prop_entity = registry.get<Component::PropertyRef>(element_entity).property_entity;
-    
-    if (!registry.all_of<Component::MaterialRef>(prop_entity)) {
-        spdlog::error("Property entity missing MaterialRef component");
+    if (!registry.ctx().contains<std::unique_ptr<TopologyData>>()) {
+        spdlog::error("TopologyData not found. Run topology extraction and ensure SimdroidPart are built.");
         return false;
     }
-    
-    auto mat_entity = registry.get<Component::MaterialRef>(prop_entity).material_entity;
+    auto& topology = *registry.ctx().get<std::unique_ptr<TopologyData>>();
+    int eid = registry.get<Component::ElementID>(element_entity).value;
+    if (eid < 0 || static_cast<size_t>(eid) >= topology.element_uid_to_part_map.size()) {
+        spdlog::error("Element ID {} out of range for element_uid_to_part_map", eid);
+        return false;
+    }
+    entt::entity part_entity = topology.element_uid_to_part_map[static_cast<size_t>(eid)];
+    if (part_entity == entt::null || !registry.all_of<Component::SimdroidPart>(part_entity)) {
+        spdlog::error("No Part found for element ID {}", eid);
+        return false;
+    }
+    entt::entity mat_entity = registry.get<Component::SimdroidPart>(part_entity).material;
     
     if (!registry.all_of<Component::LinearElasticMatrix>(mat_entity)) {
         spdlog::error("Material entity missing LinearElasticMatrix component. "

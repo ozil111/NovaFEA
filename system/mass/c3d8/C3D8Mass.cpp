@@ -7,8 +7,9 @@
  * Author: Xiaotong Wang (or hyperFEM Team)
  */
 #include "C3D8Mass.h"
+#include "../../../data_center/TopologyData.h"
 #include "../../../data_center/components/mesh_components.h"
-#include "../../../data_center/components/property_components.h"
+#include "../../../data_center/components/simdroid_components.h"
 #include "../../../data_center/components/material_components.h"
 #include "../gauss/GaussIntegration.h"
 #include <Eigen/Dense>
@@ -131,22 +132,27 @@ bool compute_c3d8_mass(entt::registry& registry, entt::entity element_entity, in
         return false;
     }
 
-    // Get material density
-    if (!registry.all_of<Component::PropertyRef>(element_entity)) {
-        spdlog::warn("Element missing PropertyRef. Skipping mass calculation.");
+    // Get material density via Part (element -> TopologyData -> Part -> material)
+    if (!registry.all_of<Component::ElementID>(element_entity)) {
+        spdlog::warn("Element missing ElementID. Skipping mass calculation.");
         return false;
     }
-
-    const auto& property_ref = registry.get<Component::PropertyRef>(element_entity);
-    entt::entity property_entity = property_ref.property_entity;
-
-    if (!registry.all_of<Component::MaterialRef>(property_entity)) {
-        spdlog::warn("Property missing MaterialRef. Skipping mass calculation.");
+    if (!registry.ctx().contains<std::unique_ptr<TopologyData>>()) {
+        spdlog::warn("TopologyData not found. Skipping mass calculation.");
         return false;
     }
-
-    const auto& material_ref = registry.get<Component::MaterialRef>(property_entity);
-    entt::entity material_entity = material_ref.material_entity;
+    auto& topology = *registry.ctx().get<std::unique_ptr<TopologyData>>();
+    int eid = registry.get<Component::ElementID>(element_entity).value;
+    if (eid < 0 || static_cast<size_t>(eid) >= topology.element_uid_to_part_map.size()) {
+        spdlog::warn("Element ID out of range. Skipping mass calculation.");
+        return false;
+    }
+    entt::entity part_entity = topology.element_uid_to_part_map[static_cast<size_t>(eid)];
+    if (part_entity == entt::null || !registry.all_of<Component::SimdroidPart>(part_entity)) {
+        spdlog::warn("No Part for element. Skipping mass calculation.");
+        return false;
+    }
+    entt::entity material_entity = registry.get<Component::SimdroidPart>(part_entity).material;
 
     if (!registry.all_of<Component::LinearElasticParams>(material_entity)) {
         spdlog::warn("Material missing LinearElasticParams. Skipping mass calculation.");

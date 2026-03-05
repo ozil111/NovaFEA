@@ -10,6 +10,7 @@
 #include "components/mesh_components.h"
 #include "components/material_components.h"
 #include "components/property_components.h"
+#include "components/simdroid_components.h"
 #include "components/load_components.h"
 #include "components/analysis_component.h"
 #include "nlohmann/json.hpp"
@@ -68,8 +69,9 @@ bool JsonParser::parse(const std::string& filepath, DataContext& data_context) {
         }
 
         // 步骤 2: Property (依赖 Material)
+        std::unordered_map<int, entt::entity> property_id_to_material;
         if (j.contains("property")) {
-            parse_properties(j, registry, material_id_map, property_id_map);
+            parse_properties(j, registry, material_id_map, property_id_map, property_id_to_material);
         }
 
         // 步骤 3: Node (无依赖)
@@ -80,6 +82,11 @@ bool JsonParser::parse(const std::string& filepath, DataContext& data_context) {
         // 步骤 4: Element (依赖 Node, Property)
         if (j.contains("mesh") && j["mesh"].contains("elements")) {
             parse_elements(j, registry, node_id_map, property_id_map, element_id_map);
+        }
+
+        // 步骤 4.5: 按 Property 构建 SimdroidPart 与单元集（材料通过 Part 绑定）
+        if (j.contains("property") && j.contains("mesh") && j["mesh"].contains("elements")) {
+            build_parts_from_properties(registry, property_id_map, property_id_to_material, element_id_map);
         }
 
         // 步骤 5: NodeSet (依赖 Node)
@@ -217,7 +224,8 @@ void JsonParser::parse_properties(
     const json& j,
     entt::registry& registry,
     const std::unordered_map<int, entt::entity>& material_id_map,
-    std::unordered_map<int, entt::entity>& property_id_map
+    std::unordered_map<int, entt::entity>& property_id_map,
+    std::unordered_map<int, entt::entity>& property_id_to_material
 ) {
     spdlog::debug("--> Parsing Properties...");
 
@@ -261,8 +269,8 @@ void JsonParser::parse_properties(
                 break;
         }
 
-        // 建立对 Material 的引用（核心！）
-        registry.emplace<Component::MaterialRef>(e, mat_it->second);
+        // 材料通过 SimdroidPart 绑定，此处仅记录 pid -> material 供后续创建 Part 使用
+        property_id_to_material[pid] = mat_it->second;
 
         property_id_map[pid] = e;
     }
@@ -356,6 +364,62 @@ void JsonParser::parse_elements(
     }
 
     spdlog::debug("<-- Elements parsed: {} entities created.", element_id_map.size());
+}
+
+// ============================================================================
+// 步骤 4.5: 按 Property 构建 SimdroidPart 与单元集
+// ============================================================================
+void JsonParser::build_parts_from_properties(
+    entt::registry& registry,
+    const std::unordered_map<int, entt::entity>& property_id_map,
+    const std::unordered_map<int, entt::entity>& property_id_to_material,
+    const std::unordered_map<int, entt::entity>& element_id_map
+) {
+    spdlog::debug("--> Building SimdroidPart from properties...");
+
+    for (const auto& [pid, section_entity] : property_id_map) {
+        auto mat_it = property_id_to_material.find(pid);
+        if (mat_it == property_id_to_material.end()) {
+            continue;
+        }
+        entt::entity material_entity = mat_it->second;
+
+        // 收集使用该 pid 的所有单元
+        std::vector<entt::entity> members;
+        for (const auto& [eid, element_entity] : element_id_map) {
+            if (!registry.all_of<Component::PropertyRef>(element_entity)) {
+                continue;
+            }
+            entt::entity prop_entity = registry.get<Component::PropertyRef>(element_entity).property_entity;
+            if (!registry.all_of<Component::PropertyID>(prop_entity)) {
+                continue;
+            }
+            if (registry.get<Component::PropertyID>(prop_entity).value == pid) {
+                members.push_back(element_entity);
+            }
+        }
+
+        if (members.empty()) {
+            continue;
+        }
+
+        // 创建单元集
+        entt::entity ele_set_entity = registry.create();
+        registry.emplace<Component::SetName>(ele_set_entity, "Part_pid_" + std::to_string(pid));
+        auto& set_members = registry.emplace<Component::ElementSetMembers>(ele_set_entity);
+        set_members.members = std::move(members);
+
+        // 创建 Part（绑定 几何/截面/材料）
+        Component::SimdroidPart part;
+        part.name = "Part_pid_" + std::to_string(pid);
+        part.element_set = ele_set_entity;
+        part.material = material_entity;
+        part.section = section_entity;
+        entt::entity part_entity = registry.create();
+        registry.emplace<Component::SimdroidPart>(part_entity, std::move(part));
+    }
+
+    spdlog::debug("<-- SimdroidPart build done.");
 }
 
 // ============================================================================

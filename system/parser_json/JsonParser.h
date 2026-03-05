@@ -68,12 +68,24 @@ private:
      * @param registry EnTT registry
      * @param material_id_map [in] mid -> entity 映射表
      * @param property_id_map [out] pid -> entity 映射表
+     * @param property_id_to_material [out] pid -> material entity，供 build_parts_from_properties 使用
      */
     static void parse_properties(
         const nlohmann::json& j,
         entt::registry& registry,
         const std::unordered_map<int, entt::entity>& material_id_map,
-        std::unordered_map<int, entt::entity>& property_id_map
+        std::unordered_map<int, entt::entity>& property_id_map,
+        std::unordered_map<int, entt::entity>& property_id_to_material
+    );
+
+    /**
+     * @brief 步骤 4.5: 按 Property 构建 SimdroidPart 与单元集，材料通过 Part 绑定
+     */
+    static void build_parts_from_properties(
+        entt::registry& registry,
+        const std::unordered_map<int, entt::entity>& property_id_map,
+        const std::unordered_map<int, entt::entity>& property_id_to_material,
+        const std::unordered_map<int, entt::entity>& element_id_map
     );
 
     /**

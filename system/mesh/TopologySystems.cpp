@@ -7,6 +7,7 @@
  * Author: Xiaotong Wang (or hyperFEM Team)
  */
 #include "TopologySystems.h"
+#include "components/simdroid_components.h"
 #include <algorithm> // for std::sort
 #include <queue>     // for std::queue in flood fill
 #include <unordered_set> // for visited tracking
@@ -75,7 +76,41 @@ void TopologySystems::extract_topology(entt::registry& registry) {
     }
 
     spdlog::info("Topology extraction complete. Found {} unique faces.", topology.faces.size());
-    
+
+    // 填充 Simdroid 映射：element_uid_to_part_map（单元 -> Part）
+    size_t max_eid = 0;
+    size_t max_nid = 0;
+    for (auto e : registry.view<const Component::ElementID>()) {
+        size_t uid = static_cast<size_t>(registry.get<Component::ElementID>(e).value);
+        if (uid > max_eid) max_eid = uid;
+    }
+    for (auto e : registry.view<const Component::NodeID>()) {
+        size_t uid = static_cast<size_t>(registry.get<Component::NodeID>(e).value);
+        if (uid > max_nid) max_nid = uid;
+    }
+    if (max_nid == 0) {
+        for (auto e : registry.view<const Component::OriginalID>()) {
+            size_t uid = static_cast<size_t>(registry.get<Component::OriginalID>(e).value);
+            if (uid > max_nid) max_nid = uid;
+        }
+    }
+    topology.reserve_simdroid_maps(max_eid, max_nid);
+
+    auto part_view = registry.view<const Component::SimdroidPart>();
+    for (auto part_entity : part_view) {
+        const auto& part = part_view.get<const Component::SimdroidPart>(part_entity);
+        if (part.element_set == entt::null) continue;
+        if (!registry.all_of<Component::ElementSetMembers>(part.element_set)) continue;
+        const auto& members = registry.get<Component::ElementSetMembers>(part.element_set).members;
+        for (entt::entity elem_entity : members) {
+            if (!registry.all_of<Component::ElementID>(elem_entity)) continue;
+            ElementID eid = registry.get<Component::ElementID>(elem_entity).value;
+            if (eid >= 0 && static_cast<size_t>(eid) < topology.element_uid_to_part_map.size()) {
+                topology.element_uid_to_part_map[static_cast<size_t>(eid)] = part_entity;
+            }
+        }
+    }
+
     // Store the topology data in the registry's context
     registry.ctx().emplace<std::unique_ptr<TopologyData>>(std::move(topology_ptr));
 }

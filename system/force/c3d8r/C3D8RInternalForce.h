@@ -17,7 +17,7 @@
  * @return true if computed successfully, false otherwise
  * @details
  *   - Reads current Position and optional InitialPosition to build element displacement
- *   - Reads material D matrix from LinearElasticMatrix (via PropertyRef -> MaterialRef)
+ *   - Reads material D matrix from LinearElasticMatrix (via Part: element_uid_to_part_map -> SimdroidPart.material)
  *   - Computes B-bar at current configuration (reduced integration)
  *   - Computes element internal force vector and accumulates into node InternalForce
  */

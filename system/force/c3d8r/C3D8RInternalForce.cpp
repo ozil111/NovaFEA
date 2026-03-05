@@ -7,8 +7,9 @@
  * Author: Xiaotong Wang (or hyperFEM Team)
  */
 #include "C3D8RInternalForce.h"
+#include "../../../data_center/TopologyData.h"
 #include "../../../data_center/components/mesh_components.h"
-#include "../../../data_center/components/property_components.h"
+#include "../../../data_center/components/simdroid_components.h"
 #include "../../../data_center/components/material_components.h"
 #include <Eigen/Dense>
 #include "spdlog/spdlog.h"
@@ -93,20 +94,23 @@ bool compute_c3d8r_internal_forces(entt::registry& registry, entt::entity elemen
         return false;
     }
 
-    // Get material D matrix
-    if (!registry.all_of<Component::PropertyRef>(element_entity)) {
+    // Get material D matrix via Part (element -> TopologyData -> Part -> material)
+    if (!registry.all_of<Component::ElementID>(element_entity)) {
         return false;
     }
-
-    const auto& property_ref = registry.get<Component::PropertyRef>(element_entity);
-    entt::entity property_entity = property_ref.property_entity;
-
-    if (!registry.all_of<Component::MaterialRef>(property_entity)) {
+    if (!registry.ctx().contains<std::unique_ptr<TopologyData>>()) {
         return false;
     }
-
-    const auto& material_ref = registry.get<Component::MaterialRef>(property_entity);
-    entt::entity material_entity = material_ref.material_entity;
+    auto& topology = *registry.ctx().get<std::unique_ptr<TopologyData>>();
+    int eid = registry.get<Component::ElementID>(element_entity).value;
+    if (eid < 0 || static_cast<size_t>(eid) >= topology.element_uid_to_part_map.size()) {
+        return false;
+    }
+    entt::entity part_entity = topology.element_uid_to_part_map[static_cast<size_t>(eid)];
+    if (part_entity == entt::null || !registry.all_of<Component::SimdroidPart>(part_entity)) {
+        return false;
+    }
+    entt::entity material_entity = registry.get<Component::SimdroidPart>(part_entity).material;
 
     if (!registry.all_of<Component::LinearElasticMatrix>(material_entity)) {
         return false;
