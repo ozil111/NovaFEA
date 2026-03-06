@@ -177,6 +177,34 @@ struct SimdroidInspector {
 
         std::unordered_set<int> deleted_eids_set(element_ids_to_delete.begin(), element_ids_to_delete.end());
 
+        // 节点若被 RigidBody / RigidBodyConstraint / Contact 引用，则不应作为孤儿删除
+        std::unordered_set<entt::entity> nodes_used_by_rigid_or_contact;
+        {
+            auto add_node_set_members = [&](entt::entity set_entity) {
+                if (!registry.valid(set_entity) || !registry.all_of<Component::NodeSetMembers>(set_entity)) return;
+                for (entt::entity e : registry.get<Component::NodeSetMembers>(set_entity).members)
+                    if (registry.valid(e)) nodes_used_by_rigid_or_contact.insert(e);
+            };
+            auto view_rb_radioss = registry.view<const Component::RigidBody>();
+            for (auto entity : view_rb_radioss) {
+                const auto& rb = view_rb_radioss.get<const Component::RigidBody>(entity);
+                if (registry.valid(rb.master_node)) nodes_used_by_rigid_or_contact.insert(rb.master_node);
+                add_node_set_members(rb.slave_node_set);
+            }
+            auto view_rb_constraint = registry.view<const Component::RigidBodyConstraint>();
+            for (auto entity : view_rb_constraint) {
+                const auto& rb = view_rb_constraint.get<const Component::RigidBodyConstraint>(entity);
+                add_node_set_members(rb.master_node_set);
+                add_node_set_members(rb.slave_node_set);
+            }
+            auto view_contacts = registry.view<const Component::ContactBase>();
+            for (auto entity : view_contacts) {
+                const auto& c = view_contacts.get<const Component::ContactBase>(entity);
+                add_node_set_members(c.master_entity);
+                add_node_set_members(c.slave_entity);
+            }
+        }
+
         for (auto elem_entity : elements_to_delete) {
             if (!registry.valid(elem_entity) || !registry.all_of<Component::Connectivity>(elem_entity)) continue;
             const auto& conn = registry.get<Component::Connectivity>(elem_entity);
@@ -197,7 +225,7 @@ struct SimdroidInspector {
                     }
                 }
 
-                if (!is_shared) {
+                if (!is_shared && nodes_used_by_rigid_or_contact.find(node_entity) == nodes_used_by_rigid_or_contact.end()) {
                     nodes_to_delete.push_back(node_entity);
                 }
             }
@@ -275,6 +303,20 @@ struct SimdroidInspector {
             for (auto e : rb_to_remove) if (registry.valid(e)) registry.destroy(e);
             if (!rb_to_remove.empty()) {
                 spdlog::info(" -> Removed {} invalidated rigid body constraints.", rb_to_remove.size());
+            }
+
+            // RigidBody (Radioss /RBODY)：主节点或从节点集失效则清理
+            auto view_rb_radioss = registry.view<const Component::RigidBody>();
+            std::vector<entt::entity> rb_radioss_to_remove;
+            for (auto entity : view_rb_radioss) {
+                const auto& rb = view_rb_radioss.get<const Component::RigidBody>(entity);
+                if (!registry.valid(rb.master_node) || !set_has_any_valid_member(rb.slave_node_set)) {
+                    rb_radioss_to_remove.push_back(entity);
+                }
+            }
+            for (auto e : rb_radioss_to_remove) if (registry.valid(e)) registry.destroy(e);
+            if (!rb_radioss_to_remove.empty()) {
+                spdlog::info(" -> Removed {} invalidated Radioss rigid bodies.", rb_radioss_to_remove.size());
             }
         }
 
