@@ -188,8 +188,13 @@ struct SimdroidInspector {
             auto view_rb_radioss = registry.view<const Component::RigidBody>();
             for (auto entity : view_rb_radioss) {
                 const auto& rb = view_rb_radioss.get<const Component::RigidBody>(entity);
-                if (registry.valid(rb.master_node)) nodes_used_by_rigid_or_contact.insert(rb.master_node);
-                add_node_set_members(rb.slave_node_set);
+                // 仅当从节点数 >= 3 时保留（与 RigidBodyConstraint 的僵尸刚体防护一致）
+                if (registry.valid(rb.slave_node_set) && registry.all_of<Component::NodeSetMembers>(rb.slave_node_set)) {
+                    if (registry.get<Component::NodeSetMembers>(rb.slave_node_set).members.size() >= 3) {
+                        if (registry.valid(rb.master_node)) nodes_used_by_rigid_or_contact.insert(rb.master_node);
+                        add_node_set_members(rb.slave_node_set);
+                    }
+                }
             }
             auto view_rb_constraint = registry.view<const Component::RigidBodyConstraint>();
             for (auto entity : view_rb_constraint) {
@@ -327,18 +332,24 @@ struct SimdroidInspector {
                 spdlog::info(" -> Removed {} invalidated rigid body constraints (including zombies).", rb_to_remove.size());
             }
 
-            // RigidBody (Radioss /RBODY)：主节点或从节点集失效则清理
+            // RigidBody (Radioss /RBODY)：主节点或从节点集失效则清理；从节点 < 3 视为僵尸刚体
             auto view_rb_radioss = registry.view<const Component::RigidBody>();
             std::vector<entt::entity> rb_radioss_to_remove;
             for (auto entity : view_rb_radioss) {
                 const auto& rb = view_rb_radioss.get<const Component::RigidBody>(entity);
-                if (!registry.valid(rb.master_node) || !set_has_any_valid_member(rb.slave_node_set)) {
+                bool slave_ok = is_set_valid_and_not_empty(rb.slave_node_set);
+                bool has_enough_inertia = true;
+                if (slave_ok && registry.all_of<Component::NodeSetMembers>(rb.slave_node_set)) {
+                    if (registry.get<Component::NodeSetMembers>(rb.slave_node_set).members.size() < 3)
+                        has_enough_inertia = false;
+                }
+                if (!registry.valid(rb.master_node) || !slave_ok || !has_enough_inertia) {
                     rb_radioss_to_remove.push_back(entity);
                 }
             }
             for (auto e : rb_radioss_to_remove) if (registry.valid(e)) registry.destroy(e);
             if (!rb_radioss_to_remove.empty()) {
-                spdlog::info(" -> Removed {} invalidated Radioss rigid bodies.", rb_radioss_to_remove.size());
+                spdlog::info(" -> Removed {} invalidated Radioss rigid bodies (including zombies).", rb_radioss_to_remove.size());
             }
         }
 
