@@ -18,6 +18,7 @@
 #include "exporter_simdroid/SimdroidExporter.h"
 #include "analysis/GraphBuilder.h"
 #include "analysis/MermaidReporter.h"
+#include "tui/ComponentTUI.h"
 #include <filesystem>
 #include <sstream>
 #include <vector>
@@ -103,6 +104,7 @@ void process_command(const std::string& command_line, AppSession& session) {
         spdlog::info("Available commands: import, import_simdroid, export_simdroid, "
                      "info, build_topology, list_bodies, show_body, "
                      "list_parts, delete_part, graph, validate_constraints, list_constraint_warnings, "
+                     "panel node <nid>, panel elem <eid>, panel part <name>, panel set <name>, "
                      "node, node_add, node_move, node_delete, "
                      "elem, elem_add, elem_delete, "
                      "list_sets, set_info, set_addnode, set_addelem, set_removenode, set_removeelem, "
@@ -907,6 +909,23 @@ void process_command(const std::string& command_line, AppSession& session) {
         } else {
             spdlog::error("Usage: elem <element_id>");
         }
+    }
+    else if (command == "panel") {
+        std::string type, id_or_name;
+        if (!(ss >> type >> id_or_name)) {
+            spdlog::error("Usage: panel <type> <id_or_name>  (type: node|elem|element|part|set)");
+            return;
+        }
+        rebuild_inspector_if_mesh_loaded(session);
+        tui::PanelEntityKind kind = tui::PanelEntityKind::Unknown;
+        std::string display_id;
+        entt::entity e = tui::resolve_panel_entity(
+            session.data.registry, &session.inspector, type, id_or_name, &kind, &display_id);
+        if (e == entt::null) {
+            spdlog::error("Panel: '{}' '{}' not found. Ensure mesh is loaded and index built.", type, id_or_name);
+            return;
+        }
+        tui::render_panel(session.data.registry, e, &session.inspector, kind, display_id, std::cout);
     }
     else {
         spdlog::warn("Unknown command: '{}'. Type 'help' for a list of commands.", command);

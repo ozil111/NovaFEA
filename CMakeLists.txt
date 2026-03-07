@@ -39,7 +39,7 @@ endif()
 
 # MSVC 特定设置
 if(MSVC)
-    add_compile_options(/utf-8)
+    add_compile_options(/utf-8 /bigobj)
     add_definitions(-D_USE_MATH_DEFINES)
 endif()
 
