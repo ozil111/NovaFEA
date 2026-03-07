@@ -8,7 +8,8 @@
     "gtest",
     "nlohmann-json",
     "entt",
-    "tinyxml2"
+    "tinyxml2",
+    "ftxui"
   ],
   "builtin-baseline": "cf72b50294a4aa13e607a0c7b40280b933801698"
 }
