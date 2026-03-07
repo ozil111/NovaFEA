@@ -1,52 +1,43 @@
 /**
  * TUI Universal Inspection Panel - Component metadata registry and render pipeline.
- * Phase 1: Metadata registry; Phase 2: Render engine (header, dispatch, output).
+ * Uses FTXUI for componentized rendering (Flexbox-style layout).
  */
 #pragma once
 
 #include "entt/entt.hpp"
+#include <ftxui/dom/elements.hpp>
 #include <functional>
 #include <string>
 #include <vector>
-#include <ostream>
 
 struct SimdroidInspector;
 
 namespace tui {
 
-/** ANSI color helpers for terminal output */
-namespace color {
-    constexpr const char* title   = "\033[1;36m";
-    constexpr const char* reset   = "\033[0m";
-    constexpr const char* green   = "\033[1;32m";
-    constexpr const char* yellow  = "\033[1;33m";
-    constexpr const char* dim     = "\033[2m";
-}
+using namespace ftxui;
 
-/** One registered component: display name + type-erased has/print. */
+/** Component render function: returns an FTXUI Element instead of writing to ostream. */
+using PrinterFn = std::function<Element(entt::registry&, entt::entity, SimdroidInspector*)>;
+
+/** One registered component: display name + type-erased has/render. */
 struct ComponentTUIEntry {
     std::string display_name;
     std::function<bool(entt::registry&, entt::entity)> has_component;
-    std::function<void(entt::registry&, entt::entity, SimdroidInspector*, std::ostream&)> print;
+    PrinterFn render;
 };
 
-/** Registry of component types to TUI printers. */
+/** Registry of component types to TUI renderers. */
 class ComponentTUIRegistry {
 public:
-    using PrinterFn = std::function<void(entt::registry&, entt::entity, SimdroidInspector*, std::ostream&)>;
-
-    /** Register a component type T with a display name and printer. */
+    /** Register a component type T with a display name and renderer. */
     template<typename T>
-    void register_component(const std::string& display_name, PrinterFn printer) {
+    void register_component(const std::string& display_name, PrinterFn renderer) {
         entries_.push_back({
             display_name,
             [](entt::registry& r, entt::entity e) { return r.all_of<T>(e); },
-            std::move(printer)
+            std::move(renderer)
         });
     }
-
-    /** For a given entity, call every applicable printer to out. */
-    void for_each_applicable(entt::registry& reg, entt::entity e, SimdroidInspector* insp, std::ostream& out) const;
 
     /** Access registered entries (e.g. for ordered iteration). */
     const std::vector<ComponentTUIEntry>& entries() const { return entries_; }
@@ -65,12 +56,11 @@ enum class PanelEntityKind { Node, Element, Part, Set, Unknown };
 entt::entity resolve_panel_entity(entt::registry& reg, SimdroidInspector* insp,
     const std::string& type, const std::string& id_or_name, PanelEntityKind* out_kind, std::string* out_display_id);
 
-/** Full TUI render: header + all registered component blocks + optional footer hints. */
+/** Full TUI render: header + all registered component blocks + footer. Renders via FTXUI to stdout. */
 void render_panel(entt::registry& reg, entt::entity e, SimdroidInspector* insp,
-    PanelEntityKind kind, const std::string& display_id, std::ostream& out);
+    PanelEntityKind kind, const std::string& display_id);
 
-/** Append force-path insight for a node (PartGraph edges, load/constraint highlight). Call after component blocks for Node. */
-void append_force_path_info(entt::registry& reg, entt::entity node_entity, SimdroidInspector* insp,
-    std::ostream& out);
+/** Force-path insight element for a node (PartGraph edges, load/constraint). Returns empty element if none. */
+Element force_path_element(entt::registry& reg, entt::entity node_entity, SimdroidInspector* insp);
 
 } // namespace tui

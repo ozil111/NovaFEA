@@ -67,6 +67,7 @@ find_package(gtest CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(entt CONFIG REQUIRED)
 find_package(tinyxml2 CONFIG REQUIRED)
+find_package(ftxui CONFIG REQUIRED)
 
 # 添加编译定义以使用header-only模式
 add_compile_definitions(
@@ -101,6 +102,8 @@ target_link_libraries(hyperFEM_app
     nlohmann_json::nlohmann_json
     EnTT::EnTT
     tinyxml2::tinyxml2
+    ftxui::dom
+    ftxui::screen
 )
 
 # 设置主程序的工作目录

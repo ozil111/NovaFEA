@@ -925,7 +925,7 @@ void process_command(const std::string& command_line, AppSession& session) {
             spdlog::error("Panel: '{}' '{}' not found. Ensure mesh is loaded and index built.", type, id_or_name);
             return;
         }
-        tui::render_panel(session.data.registry, e, &session.inspector, kind, display_id, std::cout);
+        tui::render_panel(session.data.registry, e, &session.inspector, kind, display_id);
     }
     else {
         spdlog::warn("Unknown command: '{}'. Type 'help' for a list of commands.", command);

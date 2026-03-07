@@ -1,5 +1,5 @@
 /**
- * TUI Universal Inspection Panel - Registry implementation and component printers.
+ * TUI Universal Inspection Panel - Registry implementation and FTXUI component renderers.
  */
 #include "tui/ComponentTUI.h"
 #include "simdroid/SimdroidInspector.h"
@@ -10,6 +10,8 @@
 #include "components/simdroid_components.h"
 #include "PartGraph.h"
 #include "analysis/GraphBuilder.h"
+#include <ftxui/dom/node.hpp>
+#include <ftxui/screen/screen.hpp>
 #include <algorithm>
 #include <iomanip>
 #include <sstream>
@@ -36,180 +38,185 @@ entt::entity find_part_entity_by_name(entt::registry& reg, const std::string& na
     return entt::null;
 }
 
-void print_matrix_6x6(std::ostream& out, const Eigen::Matrix<double, 6, 6>& D) {
-    const int w = 12;
+Element matrix_6x6_element(const Eigen::Matrix<double, 6, 6>& D) {
+    Elements rows;
     for (int i = 0; i < 6; ++i) {
-        out << "    ";
+        std::ostringstream line;
         for (int j = 0; j < 6; ++j)
-            out << std::setw(w) << std::fixed << std::setprecision(4) << D(i, j);
-        out << "\n";
+            line << std::setw(12) << std::fixed << std::setprecision(4) << D(i, j);
+        rows.push_back(text("    " + line.str()));
     }
+    return vbox(std::move(rows));
 }
 
 void init_registry() {
     auto& r = ComponentTUIRegistry::instance();
 
     r.register_component<Component::Position>("Position",
-        [](entt::registry& reg, entt::entity e, SimdroidInspector*, std::ostream& out) {
+        [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
             const auto& p = reg.get<Component::Position>(e);
-            out << "  " << std::fixed << std::setprecision(6)
-                << "(" << p.x << ", " << p.y << ", " << p.z << ")\n";
+            std::ostringstream sx, sy, sz;
+            sx << std::fixed << std::setprecision(6) << p.x;
+            sy << std::fixed << std::setprecision(6) << p.y;
+            sz << std::fixed << std::setprecision(6) << p.z;
+            return hbox({
+                text(" X: ") | color(Color::Red),   text(sx.str()),
+                text(" Y: ") | color(Color::Green), text(sy.str()),
+                text(" Z: ") | color(Color::Blue),  text(sz.str())
+            });
         });
 
     r.register_component<Component::NodeID>("NodeID",
-        [](entt::registry& reg, entt::entity e, SimdroidInspector*, std::ostream& out) {
-            out << "  " << reg.get<Component::NodeID>(e).value << "\n";
+        [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
+            return text("  " + std::to_string(reg.get<Component::NodeID>(e).value));
         });
 
     r.register_component<Component::ElementID>("ElementID",
-        [](entt::registry& reg, entt::entity e, SimdroidInspector*, std::ostream& out) {
-            out << "  " << reg.get<Component::ElementID>(e).value << "\n";
+        [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
+            return text("  " + std::to_string(reg.get<Component::ElementID>(e).value));
         });
 
     r.register_component<Component::Connectivity>("Connectivity",
-        [](entt::registry& reg, entt::entity e, SimdroidInspector*, std::ostream& out) {
+        [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
             const auto& c = reg.get<Component::Connectivity>(e);
-            out << "  Nodes (" << c.nodes.size() << "): ";
-            for (size_t i = 0; i < c.nodes.size(); ++i) {
-                if (i > 0) out << ", ";
-                entt::entity ne = c.nodes[i];
+            Elements node_list;
+            for (entt::entity ne : c.nodes) {
                 if (reg.valid(ne) && reg.all_of<Component::NodeID>(ne))
-                    out << reg.get<Component::NodeID>(ne).value;
+                    node_list.push_back(text(std::to_string(reg.get<Component::NodeID>(ne).value)) | border);
                 else
-                    out << "?";
+                    node_list.push_back(text("?") | border);
             }
-            out << "\n";
+            return hbox(std::move(node_list)) | flex;
         });
 
     r.register_component<Component::ElementType>("ElementType",
-        [](entt::registry& reg, entt::entity e, SimdroidInspector*, std::ostream& out) {
-            out << "  type_id = " << reg.get<Component::ElementType>(e).type_id << "\n";
+        [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
+            return text("  type_id = " + std::to_string(reg.get<Component::ElementType>(e).type_id));
         });
 
     r.register_component<Component::SimdroidPart>("SimdroidPart",
-        [](entt::registry& reg, entt::entity e, SimdroidInspector*, std::ostream& out) {
+        [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
             const auto& p = reg.get<Component::SimdroidPart>(e);
-            out << "  name = " << p.name << "\n";
+            Elements lines = { text("  name = " + p.name) };
             if (reg.valid(p.material) && reg.all_of<Component::SetName>(p.material))
-                out << "  material = " << reg.get<Component::SetName>(p.material).value << "\n";
+                lines.push_back(text("  material = " + reg.get<Component::SetName>(p.material).value));
             else
-                out << "  material = (entity)\n";
+                lines.push_back(text("  material = (entity)"));
             if (reg.valid(p.section))
-                out << "  section = (entity)\n";
+                lines.push_back(text("  section = (entity)"));
+            return vbox(std::move(lines));
         });
 
     r.register_component<Component::MaterialModel>("MaterialModel",
-        [](entt::registry& reg, entt::entity e, SimdroidInspector*, std::ostream& out) {
-            out << "  " << reg.get<Component::MaterialModel>(e).value << "\n";
+        [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
+            return text("  " + reg.get<Component::MaterialModel>(e).value);
         });
 
     r.register_component<Component::LinearElasticParams>("LinearElasticParams",
-        [](entt::registry& reg, entt::entity e, SimdroidInspector*, std::ostream& out) {
+        [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
             const auto& le = reg.get<Component::LinearElasticParams>(e);
-            out << "  rho = " << le.rho << ", E = " << le.E << ", nu = " << le.nu << "\n";
+            std::ostringstream ss;
+            ss << "  rho = " << le.rho << ", E = " << le.E << ", nu = " << le.nu;
+            return text(ss.str());
         });
 
     r.register_component<Component::LinearElasticMatrix>("LinearElasticMatrix",
-        [](entt::registry& reg, entt::entity e, SimdroidInspector*, std::ostream& out) {
+        [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
             const auto& lem = reg.get<Component::LinearElasticMatrix>(e);
-            out << "  is_initialized = " << (lem.is_initialized ? "true" : "false") << "\n";
-            if (lem.is_initialized) {
-                out << "  D (6x6):\n";
-                print_matrix_6x6(out, lem.D);
-            }
+            Elements parts = { text("  is_initialized = " + std::string(lem.is_initialized ? "true" : "false")) };
+            if (lem.is_initialized)
+                parts.push_back(vbox({ text("  D (6x6):"), matrix_6x6_element(lem.D) }));
+            return vbox(std::move(parts));
         });
 
     r.register_component<Component::AppliedLoadRef>("AppliedLoadRef",
-        [](entt::registry& reg, entt::entity e, SimdroidInspector*, std::ostream& out) {
+        [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
             const auto& ref = reg.get<Component::AppliedLoadRef>(e);
-            out << "  loads: " << ref.load_entities.size() << " ref(s)\n";
+            Elements lines = { text("  loads: " + std::to_string(ref.load_entities.size()) + " ref(s)") };
             for (size_t i = 0; i < ref.load_entities.size(); ++i) {
                 entt::entity le = ref.load_entities[i];
-                if (!reg.valid(le)) { out << "    [" << i << "] (invalid)\n"; continue; }
+                if (!reg.valid(le)) { lines.push_back(text("    [" + std::to_string(i) + "] (invalid)")); continue; }
                 if (reg.all_of<Component::NodalLoad>(le)) {
                     const auto& nl = reg.get<Component::NodalLoad>(le);
-                    out << "    [" << i << "] NodalLoad dof=" << nl.dof << " value=" << nl.value << "\n";
+                    lines.push_back(text("    [" + std::to_string(i) + "] NodalLoad dof=" + nl.dof + " value=" + std::to_string(nl.value)));
                 } else if (reg.all_of<Component::BaseAccelerationLoad>(le)) {
                     const auto& ba = reg.get<Component::BaseAccelerationLoad>(le);
-                    out << "    [" << i << "] BaseAcceleration ax=" << ba.ax << " ay=" << ba.ay << " az=" << ba.az << "\n";
+                    std::ostringstream ss;
+                    ss << "    [" << i << "] BaseAcceleration ax=" << ba.ax << " ay=" << ba.ay << " az=" << ba.az;
+                    lines.push_back(text(ss.str()));
                 } else
-                    out << "    [" << i << "] (other)\n";
+                    lines.push_back(text("    [" + std::to_string(i) + "] (other)"));
             }
+            return vbox(std::move(lines));
         });
 
     r.register_component<Component::AppliedBoundaryRef>("AppliedBoundaryRef",
-        [](entt::registry& reg, entt::entity e, SimdroidInspector*, std::ostream& out) {
+        [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
             const auto& ref = reg.get<Component::AppliedBoundaryRef>(e);
-            out << "  boundaries: " << ref.boundary_entities.size() << " ref(s)\n";
+            Elements lines = { text("  boundaries: " + std::to_string(ref.boundary_entities.size()) + " ref(s)") };
             for (size_t i = 0; i < ref.boundary_entities.size(); ++i) {
                 entt::entity be = ref.boundary_entities[i];
-                if (!reg.valid(be)) { out << "    [" << i << "] (invalid)\n"; continue; }
+                if (!reg.valid(be)) { lines.push_back(text("    [" + std::to_string(i) + "] (invalid)")); continue; }
                 if (reg.all_of<Component::BoundarySPC>(be)) {
                     const auto& spc = reg.get<Component::BoundarySPC>(be);
-                    out << "    [" << i << "] SPC dof=" << spc.dof << " value=" << spc.value << "\n";
+                    lines.push_back(text("    [" + std::to_string(i) + "] SPC dof=" + spc.dof + " value=" + std::to_string(spc.value)));
                 } else
-                    out << "    [" << i << "] (other)\n";
+                    lines.push_back(text("    [" + std::to_string(i) + "] (other)"));
             }
+            return vbox(std::move(lines));
         });
 
     r.register_component<Component::ForcePathNode>("ForcePathNode",
-        [](entt::registry& reg, entt::entity e, SimdroidInspector*, std::ostream& out) {
+        [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
             const auto& fp = reg.get<Component::ForcePathNode>(e);
-            out << "  weight = " << fp.weight
-                << ", is_load_point = " << (fp.is_load_point ? "true" : "false")
-                << ", is_constraint_point = " << (fp.is_constraint_point ? "true" : "false") << "\n";
+            std::ostringstream ss;
+            ss << "  weight = " << fp.weight
+               << ", is_load_point = " << (fp.is_load_point ? "true" : "false")
+               << ", is_constraint_point = " << (fp.is_constraint_point ? "true" : "false");
+            return text(ss.str());
         });
 
     r.register_component<Component::SetName>("SetName",
-        [](entt::registry& reg, entt::entity e, SimdroidInspector*, std::ostream& out) {
-            out << "  " << reg.get<Component::SetName>(e).value << "\n";
+        [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
+            return text("  " + reg.get<Component::SetName>(e).value);
         });
 
     r.register_component<Component::ElementSetMembers>("ElementSetMembers",
-        [](entt::registry& reg, entt::entity e, SimdroidInspector* insp, std::ostream& out) {
+        [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
             const auto& m = reg.get<Component::ElementSetMembers>(e);
-            out << "  count = " << m.members.size() << "\n  ";
+            std::string line = "  count = " + std::to_string(m.members.size()) + "\n  ";
             const size_t show = (std::min)(m.members.size(), size_t(20));
             for (size_t i = 0; i < show; ++i) {
-                if (i > 0) out << ", ";
+                if (i > 0) line += ", ";
                 entt::entity me = m.members[i];
                 if (reg.valid(me) && reg.all_of<Component::ElementID>(me))
-                    out << reg.get<Component::ElementID>(me).value;
+                    line += std::to_string(reg.get<Component::ElementID>(me).value);
                 else
-                    out << "?";
+                    line += "?";
             }
-            if (m.members.size() > show) out << " ...";
-            out << "\n";
+            if (m.members.size() > show) line += " ...";
+            return text(line);
         });
 
     r.register_component<Component::NodeSetMembers>("NodeSetMembers",
-        [](entt::registry& reg, entt::entity e, SimdroidInspector* insp, std::ostream& out) {
+        [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
             const auto& m = reg.get<Component::NodeSetMembers>(e);
-            out << "  count = " << m.members.size() << "\n  ";
+            std::string line = "  count = " + std::to_string(m.members.size()) + "\n  ";
             const size_t show = (std::min)(m.members.size(), size_t(20));
             for (size_t i = 0; i < show; ++i) {
-                if (i > 0) out << ", ";
+                if (i > 0) line += ", ";
                 entt::entity me = m.members[i];
                 if (reg.valid(me) && reg.all_of<Component::NodeID>(me))
-                    out << reg.get<Component::NodeID>(me).value;
+                    line += std::to_string(reg.get<Component::NodeID>(me).value);
                 else
-                    out << "?";
+                    line += "?";
             }
-            if (m.members.size() > show) out << " ...";
-            out << "\n";
+            if (m.members.size() > show) line += " ...";
+            return text(line);
         });
 }
 
 } // anonymous namespace
-
-void ComponentTUIRegistry::for_each_applicable(entt::registry& reg, entt::entity e, SimdroidInspector* insp, std::ostream& out) const {
-    for (const auto& entry : entries_) {
-        if (entry.has_component(reg, e)) {
-            out << color::dim << entry.display_name << ":" << color::reset << "\n";
-            entry.print(reg, e, insp, out);
-        }
-    }
-}
 
 ComponentTUIRegistry& ComponentTUIRegistry::instance() {
     static ComponentTUIRegistry inst;
@@ -269,43 +276,64 @@ entt::entity resolve_panel_entity(entt::registry& reg, SimdroidInspector* insp,
 }
 
 void render_panel(entt::registry& reg, entt::entity e, SimdroidInspector* insp,
-    PanelEntityKind kind, const std::string& display_id, std::ostream& out)
+    PanelEntityKind kind, const std::string& display_id)
 {
     const char* kind_str = "Entity";
     switch (kind) {
-        case PanelEntityKind::Node:   kind_str = "Node";   break;
+        case PanelEntityKind::Node:    kind_str = "Node";    break;
         case PanelEntityKind::Element: kind_str = "Element"; break;
-        case PanelEntityKind::Part:   kind_str = "Part";   break;
-        case PanelEntityKind::Set:   kind_str = "Set";   break;
+        case PanelEntityKind::Part:    kind_str = "Part";    break;
+        case PanelEntityKind::Set:     kind_str = "Set";     break;
         default: break;
     }
-    out << color::title << "\n=== TUI Panel [" << kind_str << " " << display_id << "] ===\n"
-        << "  entity = " << entt::to_integral(e) << color::reset << "\n\n";
 
-    ComponentTUIRegistry::instance().for_each_applicable(reg, e, insp, out);
-
-    if (kind == PanelEntityKind::Node) {
-        append_force_path_info(reg, e, insp, out);
-    } else if (kind == PanelEntityKind::Element) {
-        if (insp && insp->is_built && reg.all_of<Component::ElementID>(e)) {
-            int eid = reg.get<Component::ElementID>(e).value;
-            if (reg.all_of<Component::Connectivity>(e)) {
-                const auto& c = reg.get<Component::Connectivity>(e);
-                out << color::dim << "Contains Nodes: ";
-                for (size_t i = 0; i < c.nodes.size(); ++i) {
-                    if (i > 0) out << ", ";
-                    if (reg.valid(c.nodes[i]) && reg.all_of<Component::NodeID>(c.nodes[i]))
-                        out << reg.get<Component::NodeID>(c.nodes[i]).value;
-                }
-                out << " (Use panel node <id> to inspect)" << color::reset << "\n";
-            }
+    Elements component_views;
+    for (const auto& entry : ComponentTUIRegistry::instance().entries()) {
+        if (entry.has_component(reg, e)) {
+            component_views.push_back(
+                window(text(entry.display_name) | bold, entry.render(reg, e, insp)));
         }
     }
+
+    if (kind == PanelEntityKind::Node)
+        component_views.push_back(window(text("Force path") | bold, force_path_element(reg, e, insp)));
+    else if (kind == PanelEntityKind::Element && insp && insp->is_built && reg.all_of<Component::ElementID>(e) && reg.all_of<Component::Connectivity>(e)) {
+        const auto& c = reg.get<Component::Connectivity>(e);
+        Elements node_texts;
+        for (size_t i = 0; i < c.nodes.size(); ++i) {
+            if (i > 0) node_texts.push_back(text(", "));
+            if (reg.valid(c.nodes[i]) && reg.all_of<Component::NodeID>(c.nodes[i]))
+                node_texts.push_back(text(std::to_string(reg.get<Component::NodeID>(c.nodes[i]).value)));
+        }
+        node_texts.push_back(text(" (Use panel node <id> to inspect)") | dim);
+        component_views.push_back(window(text("Contains Nodes") | bold, hbox(std::move(node_texts))));
+    }
+
+    Element document = vbox({
+        hbox({
+            text(" hyperFEM ") | bgcolor(Color::Blue) | color(Color::White) | bold,
+            text(" Universal Inspector ") | color(Color::Cyan),
+            filler(),
+            text("Entity ID: " + std::to_string(entt::to_integral(e))) | dim
+        }) | border,
+        vbox({
+            text("") | dim,
+            text(std::string("TUI Panel [") + kind_str + " " + display_id + "]") | bold,
+            text("") | dim
+        }),
+        vbox(std::move(component_views)) | flex,
+        hbox(text(" [P] Panel  [G] Graph  [Q] Quit ") | dim)
+    });
+
+    auto screen = Screen::Create(Dimension::Full(), Dimension::Fit(document));
+    Render(screen, document);
+    std::cout << screen.ToString() << std::endl;
 }
 
-void append_force_path_info(entt::registry& reg, entt::entity node_entity, SimdroidInspector* insp, std::ostream& out) {
-    if (!insp || !insp->is_built) return;
-    if (!reg.all_of<Component::NodeID>(node_entity)) return;
+Element force_path_element(entt::registry& reg, entt::entity node_entity, SimdroidInspector* insp) {
+    Element none = text("(none)") | dim;
+    if (!insp || !insp->is_built) return none;
+    if (!reg.all_of<Component::NodeID>(node_entity)) return none;
     int nid = reg.get<Component::NodeID>(node_entity).value;
 
     bool is_load = false, is_constraint = false;
@@ -324,16 +352,17 @@ void append_force_path_info(entt::registry& reg, entt::entity node_entity, Simdr
         }
     }
 
+    Elements parts_el;
     if (is_load || is_constraint) {
-        out << color::dim << "Force path: ";
-        if (is_load) out << color::green << "load point" << color::reset << color::dim;
-        if (is_load && is_constraint) out << ", ";
-        if (is_constraint) out << color::yellow << "constraint point" << color::reset << color::dim;
-        out << color::reset << "\n";
+        Elements labels;
+        if (is_load) labels.push_back(text("load point") | color(Color::Green));
+        if (is_load && is_constraint) labels.push_back(text(", "));
+        if (is_constraint) labels.push_back(text("constraint point") | color(Color::Yellow));
+        parts_el.push_back(hbox({ text("Force path: ") | dim, hbox(std::move(labels)) }));
     }
 
     auto it_elems = insp->nid_to_elems.find(nid);
-    if (it_elems == insp->nid_to_elems.end()) return;
+    if (it_elems == insp->nid_to_elems.end()) return parts_el.empty() ? none : vbox(std::move(parts_el));
     std::vector<std::string> parts;
     for (int eid : it_elems->second) {
         auto itp = insp->eid_to_part.find(eid);
@@ -342,12 +371,12 @@ void append_force_path_info(entt::registry& reg, entt::entity node_entity, Simdr
                 parts.push_back(itp->second);
         }
     }
-    if (parts.empty()) return;
+    if (parts.empty()) return parts_el.empty() ? none : vbox(std::move(parts_el));
 
     PartGraph graph = GraphBuilder::build(reg, *insp);
-    out << color::dim << "Parts: ";
-    for (const auto& p : parts) out << "[" << p << "] ";
-    out << "\n";
+    std::string parts_line = "Parts: ";
+    for (const auto& p : parts) parts_line += "[" + p + "] ";
+    parts_el.push_back(text(parts_line) | dim);
     for (const auto& part_name : parts) {
         auto itn = graph.nodes.find(part_name);
         if (itn == graph.nodes.end()) continue;
@@ -358,12 +387,13 @@ void append_force_path_info(entt::registry& reg, entt::entity node_entity, Simdr
                 case ConnectionType::SharedNode: ct = "SharedNode"; break;
                 case ConnectionType::MPC:        ct = "MPC"; break;
             }
-            out << "  " << part_name << " --" << ct;
-            if (!edge.sub_type.empty()) out << " (" << edge.sub_type << ")";
-            out << "--> " << edge.target_part << "\n";
+            std::string line = "  " + part_name + " --" + ct;
+            if (!edge.sub_type.empty()) line += " (" + edge.sub_type + ")";
+            line += "--> " + edge.target_part;
+            parts_el.push_back(text(line) | dim);
         }
     }
-    out << color::reset;
+    return vbox(std::move(parts_el));
 }
 
 } // namespace tui
