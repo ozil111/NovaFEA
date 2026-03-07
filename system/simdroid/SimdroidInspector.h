@@ -177,6 +177,39 @@ struct SimdroidInspector {
 
         std::unordered_set<int> deleted_eids_set(element_ids_to_delete.begin(), element_ids_to_delete.end());
 
+        // 节点若被 RigidBody / RigidBodyConstraint / Contact 引用，则不应作为孤儿删除
+        std::unordered_set<entt::entity> nodes_used_by_rigid_or_contact;
+        {
+            auto add_node_set_members = [&](entt::entity set_entity) {
+                if (!registry.valid(set_entity) || !registry.all_of<Component::NodeSetMembers>(set_entity)) return;
+                for (entt::entity e : registry.get<Component::NodeSetMembers>(set_entity).members)
+                    if (registry.valid(e)) nodes_used_by_rigid_or_contact.insert(e);
+            };
+            auto view_rb_radioss = registry.view<const Component::RigidBody>();
+            for (auto entity : view_rb_radioss) {
+                const auto& rb = view_rb_radioss.get<const Component::RigidBody>(entity);
+                // 仅当从节点数 >= 3 时保留（与 RigidBodyConstraint 的僵尸刚体防护一致）
+                if (registry.valid(rb.slave_node_set) && registry.all_of<Component::NodeSetMembers>(rb.slave_node_set)) {
+                    if (registry.get<Component::NodeSetMembers>(rb.slave_node_set).members.size() >= 3) {
+                        if (registry.valid(rb.master_node)) nodes_used_by_rigid_or_contact.insert(rb.master_node);
+                        add_node_set_members(rb.slave_node_set);
+                    }
+                }
+            }
+            auto view_rb_constraint = registry.view<const Component::RigidBodyConstraint>();
+            for (auto entity : view_rb_constraint) {
+                const auto& rb = view_rb_constraint.get<const Component::RigidBodyConstraint>(entity);
+                add_node_set_members(rb.master_node_set);
+                add_node_set_members(rb.slave_node_set);
+            }
+            auto view_contacts = registry.view<const Component::ContactBase>();
+            for (auto entity : view_contacts) {
+                const auto& c = view_contacts.get<const Component::ContactBase>(entity);
+                add_node_set_members(c.master_entity);
+                add_node_set_members(c.slave_entity);
+            }
+        }
+
         for (auto elem_entity : elements_to_delete) {
             if (!registry.valid(elem_entity) || !registry.all_of<Component::Connectivity>(elem_entity)) continue;
             const auto& conn = registry.get<Component::Connectivity>(elem_entity);
@@ -197,7 +230,7 @@ struct SimdroidInspector {
                     }
                 }
 
-                if (!is_shared) {
+                if (!is_shared && nodes_used_by_rigid_or_contact.find(node_entity) == nodes_used_by_rigid_or_contact.end()) {
                     nodes_to_delete.push_back(node_entity);
                 }
             }
@@ -224,36 +257,47 @@ struct SimdroidInspector {
             registry.destroy(part_entity);
         }
 
+        // 5.5 物理清理所有 Set 中的失效句柄 (避免导出脏数据)
+        {
+            auto nset_view = registry.view<Component::NodeSetMembers>();
+            for (auto set_entity : nset_view) {
+                auto& mem = nset_view.get<Component::NodeSetMembers>(set_entity).members;
+                mem.erase(std::remove_if(mem.begin(), mem.end(),
+                    [&](entt::entity e) { return !registry.valid(e); }), mem.end());
+            }
+
+            auto eset_view = registry.view<Component::ElementSetMembers>();
+            for (auto set_entity : eset_view) {
+                auto& mem = eset_view.get<Component::ElementSetMembers>(set_entity).members;
+                mem.erase(std::remove_if(mem.begin(), mem.end(),
+                    [&](entt::entity e) { return !registry.valid(e); }), mem.end());
+            }
+        }
+
         // 6. 清理失效的交互定义 (Contact, Constraints)
         {
-            auto set_has_any_valid_member = [&](entt::entity set_entity) -> bool {
+            auto is_set_valid_and_not_empty = [&](entt::entity set_entity) -> bool {
                 if (!registry.valid(set_entity)) return false;
+
                 if (registry.all_of<Component::NodeSetMembers>(set_entity)) {
-                    const auto& mem = registry.get<Component::NodeSetMembers>(set_entity).members;
-                    for (auto e : mem) if (registry.valid(e)) return true;
-                    return false;
+                    return !registry.get<Component::NodeSetMembers>(set_entity).members.empty();
                 }
                 if (registry.all_of<Component::ElementSetMembers>(set_entity)) {
-                    const auto& mem = registry.get<Component::ElementSetMembers>(set_entity).members;
-                    for (auto e : mem) if (registry.valid(e)) return true;
-                    return false;
+                    return !registry.get<Component::ElementSetMembers>(set_entity).members.empty();
                 }
                 if (registry.all_of<Component::SurfaceSetMembers>(set_entity)) {
-                    const auto& mem = registry.get<Component::SurfaceSetMembers>(set_entity).members;
-                    for (auto e : mem) if (registry.valid(e)) return true;
-                    return false;
+                    return !registry.get<Component::SurfaceSetMembers>(set_entity).members.empty();
                 }
-                // 不是 Set 类型（例如具体的 Surface/Node/Element 实体），只要实体还在就认为有效
-                return registry.valid(set_entity);
+                return true;
             };
 
-            // Contacts
+            // Contacts 清理
             auto view_contacts = registry.view<const Component::ContactBase>();
             std::vector<entt::entity> contacts_to_remove;
             for (auto entity : view_contacts) {
                 const auto& contact = view_contacts.get<const Component::ContactBase>(entity);
-                if (!registry.valid(contact.master_entity) || !registry.valid(contact.slave_entity)
-                    || !set_has_any_valid_member(contact.master_entity) || !set_has_any_valid_member(contact.slave_entity)) {
+                if (!is_set_valid_and_not_empty(contact.master_entity) ||
+                    !is_set_valid_and_not_empty(contact.slave_entity)) {
                     contacts_to_remove.push_back(entity);
                 }
             }
@@ -262,19 +306,50 @@ struct SimdroidInspector {
                 spdlog::info(" -> Removed {} invalidated contact definitions.", contacts_to_remove.size());
             }
 
-            // Rigid body / MPC constraints
+            // Rigid Body 清理（含僵尸刚体防护：从节点过少无法提供转动惯量 → Error 274）
             auto view_rb = registry.view<const Component::RigidBodyConstraint>();
             std::vector<entt::entity> rb_to_remove;
             for (auto entity : view_rb) {
                 const auto& rb = view_rb.get<const Component::RigidBodyConstraint>(entity);
-                if (!registry.valid(rb.master_node_set) || !registry.valid(rb.slave_node_set)
-                    || !set_has_any_valid_member(rb.master_node_set) || !set_has_any_valid_member(rb.slave_node_set)) {
+
+                bool master_valid = is_set_valid_and_not_empty(rb.master_node_set);
+                bool slave_valid = is_set_valid_and_not_empty(rb.slave_node_set);
+
+                bool has_enough_inertia = true;
+                if (slave_valid && registry.all_of<Component::NodeSetMembers>(rb.slave_node_set)) {
+                    size_t slave_count = registry.get<Component::NodeSetMembers>(rb.slave_node_set).members.size();
+                    if (slave_count < 3) {
+                        has_enough_inertia = false;
+                    }
+                }
+
+                if (!master_valid || !slave_valid || !has_enough_inertia) {
                     rb_to_remove.push_back(entity);
                 }
             }
             for (auto e : rb_to_remove) if (registry.valid(e)) registry.destroy(e);
             if (!rb_to_remove.empty()) {
-                spdlog::info(" -> Removed {} invalidated rigid body constraints.", rb_to_remove.size());
+                spdlog::info(" -> Removed {} invalidated rigid body constraints (including zombies).", rb_to_remove.size());
+            }
+
+            // RigidBody (Radioss /RBODY)：主节点或从节点集失效则清理；从节点 < 3 视为僵尸刚体
+            auto view_rb_radioss = registry.view<const Component::RigidBody>();
+            std::vector<entt::entity> rb_radioss_to_remove;
+            for (auto entity : view_rb_radioss) {
+                const auto& rb = view_rb_radioss.get<const Component::RigidBody>(entity);
+                bool slave_ok = is_set_valid_and_not_empty(rb.slave_node_set);
+                bool has_enough_inertia = true;
+                if (slave_ok && registry.all_of<Component::NodeSetMembers>(rb.slave_node_set)) {
+                    if (registry.get<Component::NodeSetMembers>(rb.slave_node_set).members.size() < 3)
+                        has_enough_inertia = false;
+                }
+                if (!registry.valid(rb.master_node) || !slave_ok || !has_enough_inertia) {
+                    rb_radioss_to_remove.push_back(entity);
+                }
+            }
+            for (auto e : rb_radioss_to_remove) if (registry.valid(e)) registry.destroy(e);
+            if (!rb_radioss_to_remove.empty()) {
+                spdlog::info(" -> Removed {} invalidated Radioss rigid bodies (including zombies).", rb_radioss_to_remove.size());
             }
         }
 
