@@ -916,7 +916,6 @@ void process_command(const std::string& command_line, AppSession& session) {
             spdlog::error("Usage: panel <type> <id_or_name>  (type: node|elem|element|part|set)");
             return;
         }
-        rebuild_inspector_if_mesh_loaded(session);
         tui::PanelEntityKind kind = tui::PanelEntityKind::Unknown;
         std::string display_id;
         entt::entity e = tui::resolve_panel_entity(
