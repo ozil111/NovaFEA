@@ -307,6 +307,14 @@ void render_panel(entt::registry& reg, entt::entity e, SimdroidInspector* insp,
         }
         node_texts.push_back(text(" (Use panel node <id> to inspect)") | dim);
         component_views.push_back(window(text("Contains Nodes") | bold, hbox(std::move(node_texts))));
+
+        // Show part of this element if available in inspector
+        int eid = reg.get<Component::ElementID>(e).value;
+        auto itp = insp->eid_to_part.find(eid);
+        if (itp != insp->eid_to_part.end()) {
+            std::string part_line = "Part: [" + itp->second + "]";
+            component_views.push_back(window(text("Part") | bold, text(part_line) | dim));
+        }
     }
 
     Element document = vbox({
