@@ -307,6 +307,14 @@ void render_panel(entt::registry& reg, entt::entity e, SimdroidInspector* insp,
         }
         node_texts.push_back(text(" (Use panel node <id> to inspect)") | dim);
         component_views.push_back(window(text("Contains Nodes") | bold, hbox(std::move(node_texts))));
+
+        // Show part of this element if available in inspector
+        int eid = reg.get<Component::ElementID>(e).value;
+        auto itp = insp->eid_to_part.find(eid);
+        if (itp != insp->eid_to_part.end()) {
+            std::string part_line = "Part: [" + itp->second + "]";
+            component_views.push_back(window(text("Part") | bold, text(part_line) | dim));
+        }
     }
 
     Element document = vbox({
@@ -363,8 +371,21 @@ Element force_path_element(entt::registry& reg, entt::entity node_entity, Simdro
 
     auto it_elems = insp->nid_to_elems.find(nid);
     if (it_elems == insp->nid_to_elems.end()) return parts_el.empty() ? none : vbox(std::move(parts_el));
+
+    const auto& elem_ids = it_elems->second;
+    if (!elem_ids.empty()) {
+        std::string elems_line = "Elements: ";
+        const size_t show_e = (std::min)(elem_ids.size(), size_t(20));
+        for (size_t i = 0; i < show_e; ++i) {
+            if (i > 0) elems_line += ", ";
+            elems_line += std::to_string(elem_ids[i]);
+        }
+        if (elem_ids.size() > show_e) elems_line += " ...";
+        parts_el.push_back(text(elems_line) | dim);
+    }
+
     std::vector<std::string> parts;
-    for (int eid : it_elems->second) {
+    for (int eid : elem_ids) {
         auto itp = insp->eid_to_part.find(eid);
         if (itp != insp->eid_to_part.end()) {
             if (std::find(parts.begin(), parts.end(), itp->second) == parts.end())
