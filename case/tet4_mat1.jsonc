@@ -1,0 +1,38 @@
+{
+    "mesh": {
+        "nodes": [
+            //{nid:id, x:x, y:y, z:z}
+            {"nid":1, "x":0.0, "y":0.0, "z":0.0},
+            {"nid":2, "x":1.0, "y":0.0, "z":0.0},
+            {"nid":3, "x":0.0, "y":1.0, "z":0.0},
+            {"nid":4, "x":0.0, "y":0.0, "z":1.0}
+        ],
+        "elements": [
+            //{eid:id, etype:type, nids:[nid1, nid2, nid3, nid4]}
+            {"eid":1, "etype":304, "pid":1,"nids":[4,1,3,2]}
+        ]
+    },
+    "nodeset": [
+        {"nsid":1,"name":"fix","nids":[1,2,3]},
+        {"nsid":2,"name":"load","nids":[4]}
+    ],
+    "eleset": [
+        {"esid":1,"name":"all","eids":[1]}
+    ],
+    "material": [
+        {"mid":1,"typeid":1,"rho":1000.0,"E":2.0e7,"nu":0.3}
+    ],
+    "property": [
+        {"pid":1,"typeid":1,"mid":1,"integration_network":1,"hourglass_control":"null"}
+    ],
+    "boundary": [
+        {"bid":1,"typeid":1,"nsid":1,"dof":"all","value":0.0}
+    ],
+    "load": [
+        {"lid":1,"typeid":1,"nsid":2,"dof":"z","value":100000.0}
+    ],
+    "analysis": [
+        {"aid":1,"analysis_type":"static"}
+    ],
+    "output": {"node_output":["Displacement"]}
+}

@@ -8,6 +8,7 @@
  */
 #include "AssemblySystem.h"
 #include "../element/c3d8r/C3D8RStiffnessMatrix.h"
+#include "../element/tet4/Tet4StiffnessMatrix.h"
 #include "../../data_center/DofMap.h"
 #include "../../data_center/TopologyData.h"
 #include "../../data_center/components/mesh_components.h"
@@ -21,9 +22,9 @@
 bool AssemblySystem::compute_element_stiffness_dispatcher(
     entt::registry& registry,
     entt::entity element_entity,
-    Eigen::MatrixXd& Ke_buffer
+    double* Ke_raw,
+    int& element_dofs
 ) {
-    // A. 获取单元类型
     if (!registry.all_of<Component::ElementType>(element_entity)) {
         spdlog::error("Element entity missing ElementType component");
         return false;
@@ -31,8 +32,6 @@ bool AssemblySystem::compute_element_stiffness_dispatcher(
     
     int type_id = registry.get<Component::ElementType>(element_entity).type_id;
 
-    // B. 准备数据：通过 Part 获取材料 D 矩阵（element -> TopologyData -> Part -> material）
-    // -----------------------------------------------------
     if (!registry.all_of<Component::ElementID>(element_entity)) {
         spdlog::error("Element entity missing ElementID component");
         return false;
@@ -69,13 +68,15 @@ bool AssemblySystem::compute_element_stiffness_dispatcher(
     
     const Eigen::Matrix<double, 6, 6>& D = material_matrix.D;
 
-    // C. switch-case 分发（传入 D 矩阵，避免重复查找）
-    // -----------------------------------------------------
     switch (type_id) {
         case 308: {  // Hexa8 (C3D8R)
             try {
-                // 调用高性能版本，直接传入 D 矩阵，输出到缓冲区
-                compute_c3d8r_stiffness_matrix(registry, element_entity, D, Ke_buffer);
+                Eigen::MatrixXd Ke_eigen;
+                compute_c3d8r_stiffness_matrix(registry, element_entity, D, Ke_eigen);
+                element_dofs = static_cast<int>(Ke_eigen.rows());
+                for (int i = 0; i < element_dofs; ++i)
+                    for (int j = 0; j < element_dofs; ++j)
+                        Ke_raw[i * element_dofs + j] = Ke_eigen(i, j);
                 return true;
             } catch (const std::exception& e) {
                 spdlog::error("Error computing C3D8R stiffness matrix: {}", e.what());
@@ -83,11 +84,34 @@ bool AssemblySystem::compute_element_stiffness_dispatcher(
             }
         }
         
-        // 未来可以添加其他单元类型：
-        // case 304: {  // Tetra4
-        //     compute_tet4_stiffness_matrix(registry, element_entity, D, Ke_buffer);
-        //     return true;
-        // }
+        case 304: {  // Tetra4 (Tet4) — 直接调用纯 C 内核，零 Eigen 开销
+            const auto& conn = registry.get<Component::Connectivity>(element_entity);
+            if (conn.nodes.size() != 4) {
+                spdlog::error("Tet4 stiffness: Connectivity is not 4 nodes");
+                return false;
+            }
+
+            double coords[12];
+            for (int a = 0; a < 4; ++a) {
+                const entt::entity n = conn.nodes[static_cast<size_t>(a)];
+                if (!registry.all_of<Component::Position>(n)) {
+                    spdlog::error("Tet4 stiffness: node {} missing Position", a);
+                    return false;
+                }
+                const auto& p = registry.get<Component::Position>(n);
+                coords[3 * a] = p.x;
+                coords[3 * a + 1] = p.y;
+                coords[3 * a + 2] = p.z;
+            }
+
+            const double volume = compute_tet4_stiffness(coords, D.data(), Ke_raw);
+            if (!(volume > 0.0) || !std::isfinite(volume)) {
+                spdlog::error("Tet4 stiffness: invalid volume for element {}", eid);
+                return false;
+            }
+            element_dofs = 12;
+            return true;
+        }
         
         default:
             spdlog::warn("Unknown element type {} for stiffness calculation", type_id);
@@ -128,14 +152,12 @@ void AssemblySystem::assemble_stiffness(
     std::vector<Triplet> triplets;
     triplets.reserve(dof_map.num_total_dofs * 60);
     
-    // 3. 预分配单元刚度矩阵缓冲区（避免循环内堆分配）
-    // 最大可能是 60x60（20 节点六面体），预留足够空间
-    Eigen::MatrixXd Ke_buffer;
+    // 3. 栈分配单元刚度矩阵缓冲区（row-major），避免任何堆分配
+    double Ke_raw[MAX_ELEMENT_DOFS * MAX_ELEMENT_DOFS];
+    int element_dofs = 0;
     
-    // 4. 获取 DOF 映射数组的指针（直接数组访问，极快）
     const int* dof_array_ptr = dof_map.get_dof_array_ptr();
     
-    // 5. 遍历所有单元（不管类型，统一遍历）
     auto view = registry.view<Component::Connectivity, Component::ElementType>();
     
     size_t element_count = 0;
@@ -144,47 +166,32 @@ void AssemblySystem::assemble_stiffness(
     for (auto entity : view) {
         element_count++;
         
-        // --- Step 1: 调用 Dispatcher 计算单元刚度矩阵到缓冲区 ---
-        if (!compute_element_stiffness_dispatcher(registry, entity, Ke_buffer)) {
-            skipped_count++;
-            continue;  // 跳过不支持的单元
-        }
-        
-        // --- Step 2: 统一组装逻辑 ---
-        const auto& conn = view.get<Component::Connectivity>(entity);
-        int num_nodes = static_cast<int>(conn.nodes.size());
-        int num_dofs_per_node = 3;  // 假设全是 3D 实体单元
-        int element_dofs = num_nodes * num_dofs_per_node;
-        
-        // 验证单元刚度矩阵大小
-        if (Ke_buffer.rows() != element_dofs || Ke_buffer.cols() != element_dofs) {
-            spdlog::warn("Element stiffness matrix size mismatch: expected {}x{}, got {}x{}",
-                        element_dofs, element_dofs, Ke_buffer.rows(), Ke_buffer.cols());
+        if (!compute_element_stiffness_dispatcher(registry, entity, Ke_raw, element_dofs)) {
             skipped_count++;
             continue;
         }
         
-        // 双层循环填坑：遍历单元刚度矩阵的每个元素
-        // 【性能优化】使用直接数组访问，跳过边界检查
+        const auto& conn = view.get<Component::Connectivity>(entity);
+        constexpr int num_dofs_per_node = 3;
+        
         for (int i = 0; i < element_dofs; ++i) {
-            // 计算局部节点和自由度索引
             int local_node_i = i / num_dofs_per_node;
             int local_dof_i = i % num_dofs_per_node;
             
-            // 【关键优化】直接数组访问，O(1) 复杂度，无函数调用和边界检查开销
             uint32_t entity_id_i = static_cast<uint32_t>(conn.nodes[local_node_i]);
             int global_row = dof_array_ptr[entity_id_i] + local_dof_i;
             
+            const double* Ke_row = Ke_raw + i * element_dofs;
+            
             for (int j = 0; j < element_dofs; ++j) {
-                int local_node_j = j / num_dofs_per_node;
-                int local_dof_j = j % num_dofs_per_node;
-                
-                uint32_t entity_id_j = static_cast<uint32_t>(conn.nodes[local_node_j]);
-                int global_col = dof_array_ptr[entity_id_j] + local_dof_j;
-                
-                // 只添加非零元素（过滤极小的数值误差）
-                double value = Ke_buffer(i, j);
+                double value = Ke_row[j];
                 if (std::abs(value) > 1.0e-15) {
+                    int local_node_j = j / num_dofs_per_node;
+                    int local_dof_j = j % num_dofs_per_node;
+                    
+                    uint32_t entity_id_j = static_cast<uint32_t>(conn.nodes[local_node_j]);
+                    int global_col = dof_array_ptr[entity_id_j] + local_dof_j;
+                    
                     triplets.emplace_back(global_row, global_col, value);
                 }
             }

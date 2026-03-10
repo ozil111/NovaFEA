@@ -28,6 +28,7 @@
 #include "analysis/GraphBuilder.h"
 #include "analysis/MermaidReporter.h"
 #include "main0_explicit.h"              // 显式求解器逻辑
+#include "main0_linearstatic.h"          // 线性静力求解器逻辑
 #include "CommandProcessor.h"            // 命令处理器
 #include <iostream>
 #include <string>
@@ -235,6 +236,11 @@ int main(int argc, char* argv[]) {
                 && data_context.registry.all_of<Component::AnalysisType>(data_context.analysis_entity)
                 && data_context.registry.get<Component::AnalysisType>(data_context.analysis_entity).value == "explicit") {
                 run_explicit_solver(data_context);
+            } else if (data_context.analysis_entity != entt::null
+                && data_context.registry.valid(data_context.analysis_entity)
+                && data_context.registry.all_of<Component::AnalysisType>(data_context.analysis_entity)
+                && data_context.registry.get<Component::AnalysisType>(data_context.analysis_entity).value == "static") {
+                run_linearstatic_solver(data_context);
             }
             
             // --- Step 6: Export the mesh if an output file is specified ---
