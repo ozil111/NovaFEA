@@ -9,6 +9,7 @@
 #include "TopologySystems.h"
 #include "components/simdroid_components.h"
 #include <algorithm> // for std::sort
+#include <stdexcept>
 #include <queue>     // for std::queue in flood fill
 #include <unordered_set> // for visited tracking
 #include "spdlog/spdlog.h"
@@ -43,9 +44,16 @@ void TopologySystems::extract_topology(entt::registry& registry) {
         element_node_ids.reserve(connectivity.nodes.size());
         
         for (entt::entity node_entity : connectivity.nodes) {
-            // Get the OriginalID component from each node entity
-            const auto& node_orig_id = registry.get<Component::OriginalID>(node_entity);
-            element_node_ids.push_back(node_orig_id.value);
+            // NOTE: JSON parser uses Component::NodeID, legacy uses Component::OriginalID.
+            if (registry.all_of<Component::NodeID>(node_entity)) {
+                const auto& nid = registry.get<Component::NodeID>(node_entity);
+                element_node_ids.push_back(nid.value);
+            } else if (registry.all_of<Component::OriginalID>(node_entity)) {
+                const auto& oid = registry.get<Component::OriginalID>(node_entity);
+                element_node_ids.push_back(oid.value);
+            } else {
+                throw std::runtime_error("TopologySystems::extract_topology: node entity missing NodeID/OriginalID");
+            }
         }
 
         // 2. 从单元中提取所有的面

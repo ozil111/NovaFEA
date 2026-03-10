@@ -8,6 +8,7 @@
  */
 #include "AssemblySystem.h"
 #include "../element/c3d8r/C3D8RStiffnessMatrix.h"
+#include "../element/tet4/Tet4StiffnessMatrix.h"
 #include "../../data_center/DofMap.h"
 #include "../../data_center/TopologyData.h"
 #include "../../data_center/components/mesh_components.h"
@@ -84,10 +85,15 @@ bool AssemblySystem::compute_element_stiffness_dispatcher(
         }
         
         // 未来可以添加其他单元类型：
-        // case 304: {  // Tetra4
-        //     compute_tet4_stiffness_matrix(registry, element_entity, D, Ke_buffer);
-        //     return true;
-        // }
+        case 304: {  // Tetra4 (Tet4)
+            try {
+                compute_tet4_stiffness_matrix(registry, element_entity, D, Ke_buffer);
+                return true;
+            } catch (const std::exception& e) {
+                spdlog::error("Error computing Tet4 stiffness matrix: {}", e.what());
+                return false;
+            }
+        }
         
         default:
             spdlog::warn("Unknown element type {} for stiffness calculation", type_id);

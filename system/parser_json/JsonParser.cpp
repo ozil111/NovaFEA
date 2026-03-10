@@ -642,7 +642,7 @@ void JsonParser::parse_loads(
                 Component::Curve default_curve_data;
                 default_curve_data.type = "linear";
                 default_curve_data.x = {0.0, 1.0};
-                default_curve_data.y = {0.0, 1.0};
+                default_curve_data.y = {1.0, 1.0};
                 registry.emplace<Component::Curve>(default_curve, default_curve_data);
                 
                 curve_id_map[0] = default_curve;
