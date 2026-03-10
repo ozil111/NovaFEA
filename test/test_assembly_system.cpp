@@ -254,20 +254,20 @@ TEST_F(AssemblySystemTest, AssemblySystemDispatcherTest) {
     LinearElasticMatrixSystem::compute_linear_elastic_matrix(registry);
     
     // Test dispatcher
-    Eigen::MatrixXd Ke_buffer;
+    double Ke_raw[AssemblySystem::MAX_ELEMENT_DOFS * AssemblySystem::MAX_ELEMENT_DOFS];
+    int element_dofs = 0;
     bool success = AssemblySystem::compute_element_stiffness_dispatcher(
-        registry, element_entity, Ke_buffer
+        registry, element_entity, Ke_raw, element_dofs
     );
     
     EXPECT_TRUE(success);
-    EXPECT_EQ(Ke_buffer.rows(), 24);
-    EXPECT_EQ(Ke_buffer.cols(), 24);
+    EXPECT_EQ(element_dofs, 24);
     
     // Test with invalid element (no ElementType)
     auto invalid_element = registry.create();
-    Eigen::MatrixXd Ke_invalid;
+    int invalid_dofs = 0;
     bool fail = AssemblySystem::compute_element_stiffness_dispatcher(
-        registry, invalid_element, Ke_invalid
+        registry, invalid_element, Ke_raw, invalid_dofs
     );
     EXPECT_FALSE(fail);
 }

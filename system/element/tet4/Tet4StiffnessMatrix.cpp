@@ -41,37 +41,31 @@ void compute_tet4_stiffness_matrix(
         coords[base + 2] = p.z;
     }
 
-    // Use low-level stiffness routine (also returns element volume x28 = detJ/6)
     double Ke_raw[12 * 12];
-    const double volume = compute_tet4_stiffness(coords, D, Ke_raw);
+    const double volume = compute_tet4_stiffness(coords, D.data(), Ke_raw);
 
     if (!(volume > 0.0) || !std::isfinite(volume)) {
         throw std::runtime_error("Tet4 stiffness: invalid volume");
     }
 
-    // Copy into Eigen matrix
     Ke_out.resize(12, 12);
-    for (int i = 0; i < 12; ++i) {
-        for (int j = 0; j < 12; ++j) {
-            Ke_out(i, j) = Ke_raw[i * 12 + j];
-        }
-    }
-}
+    Ke_out = Eigen::Map<const Eigen::Matrix<double, 12, 12, Eigen::RowMajor>>(Ke_raw);
+ }
 
-double compute_tet4_stiffness(const double* coords, const Eigen::Matrix<double, 6, 6>& D, double* Ke) {
+double compute_tet4_stiffness(const double* coords, const double* D, double* Ke) {
     // --- 1. 读取 4 个节点坐标（按 [x0,y0,z0, x1,y1,z1, ...] 展开） ---
     double x0 = coords[0];  double y0 = coords[1];  double z0 = coords[2];   // 节点 1
     double x1 = coords[3];  double y1 = coords[4];  double z1 = coords[5];   // 节点 2
     double x2 = coords[6];  double y2 = coords[7];  double z2 = coords[8];   // 节点 3
     double x3 = coords[9];  double y3 = coords[10]; double z3 = coords[11];  // 节点 4
 
-    // --- 2. 将 6x6 本构矩阵 D 拆成标量，减少后续索引开销 ---
-    double D_0_0 = D(0,0); double D_0_1 = D(0,1); double D_0_2 = D(0,2); double D_0_3 = D(0,3); double D_0_4 = D(0,4); double D_0_5 = D(0,5);
-    double D_1_0 = D(1,0); double D_1_1 = D(1,1); double D_1_2 = D(1,2); double D_1_3 = D(1,3); double D_1_4 = D(1,4); double D_1_5 = D(1,5);
-    double D_2_0 = D(2,0); double D_2_1 = D(2,1); double D_2_2 = D(2,2); double D_2_3 = D(2,3); double D_2_4 = D(2,4); double D_2_5 = D(2,5);
-    double D_3_0 = D(3,0); double D_3_1 = D(3,1); double D_3_2 = D(3,2); double D_3_3 = D(3,3); double D_3_4 = D(3,4); double D_3_5 = D(3,5);
-    double D_4_0 = D(4,0); double D_4_1 = D(4,1); double D_4_2 = D(4,2); double D_4_3 = D(4,3); double D_4_4 = D(4,4); double D_4_5 = D(4,5);
-    double D_5_0 = D(5,0); double D_5_1 = D(5,1); double D_5_2 = D(5,2); double D_5_3 = D(5,3); double D_5_4 = D(5,4); double D_5_5 = D(5,5);
+    // --- 2. 将 6x6 本构矩阵 D 拆成标量（D 按列主序存储，D(i,j) = D[j*6+i]） ---
+    double D_0_0 = D[0];  double D_0_1 = D[6];  double D_0_2 = D[12]; double D_0_3 = D[18]; double D_0_4 = D[24]; double D_0_5 = D[30];
+    double D_1_0 = D[1];  double D_1_1 = D[7];  double D_1_2 = D[13]; double D_1_3 = D[19]; double D_1_4 = D[25]; double D_1_5 = D[31];
+    double D_2_0 = D[2];  double D_2_1 = D[8];  double D_2_2 = D[14]; double D_2_3 = D[20]; double D_2_4 = D[26]; double D_2_5 = D[32];
+    double D_3_0 = D[3];  double D_3_1 = D[9];  double D_3_2 = D[15]; double D_3_3 = D[21]; double D_3_4 = D[27]; double D_3_5 = D[33];
+    double D_4_0 = D[4];  double D_4_1 = D[10]; double D_4_2 = D[16]; double D_4_3 = D[22]; double D_4_4 = D[28]; double D_4_5 = D[34];
+    double D_5_0 = D[5];  double D_5_1 = D[11]; double D_5_2 = D[17]; double D_5_3 = D[23]; double D_5_4 = D[29]; double D_5_5 = D[35];
 
     // --- 3. 预计算若干与坐标相关的中间量（用于雅可比与形函数梯度） ---
     double x4 = y1*z2;

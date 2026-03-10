@@ -24,21 +24,21 @@ public:
     using SparseMatrix = Eigen::SparseMatrix<double, Eigen::RowMajor>;
     using Triplet = Eigen::Triplet<double>;
 
+    static constexpr int MAX_ELEMENT_DOFS = 60;
+
     /**
-     * @brief [Dispatcher] 根据单元类型分发到相应的刚度矩阵计算函数（高性能版本）
+     * @brief [Dispatcher] 根据单元类型分发到相应的刚度矩阵计算函数
      * @param registry EnTT registry
      * @param element_entity 单元实体句柄
-     * @param Ke_buffer 输出的单元刚度矩阵缓冲区（会被 resize 为相应大小）
+     * @param Ke_raw 输出的单元刚度矩阵缓冲区（row-major, 至少 MAX_ELEMENT_DOFS^2）
+     * @param element_dofs 输出的单元自由度数
      * @return true 如果成功计算，false 如果不支持的单元类型
-     * @details 
-     *   - 自动获取节点坐标和材料 D 矩阵
-     *   - 根据单元类型 ID 调用相应的计算函数
-     *   - 使用输出参数避免堆内存分配，提高性能
      */
     static bool compute_element_stiffness_dispatcher(
         entt::registry& registry,
         entt::entity element_entity,
-        Eigen::MatrixXd& Ke_buffer
+        double* Ke_raw,
+        int& element_dofs
     );
 
     /**

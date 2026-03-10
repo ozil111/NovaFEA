@@ -26,15 +26,15 @@ void compute_tet4_stiffness_matrix(
 );
 
 /**
- * @brief Low-level Tet4 stiffness routine using raw coordinates.
+ * @brief Low-level Tet4 stiffness routine — pure C interface, no Eigen dependency.
  * @param coords Node coordinates array [x0,y0,z0, x1,y1,z1, x2,y2,z2, x3,y3,z3].
- * @param D Material matrix (6x6).
+ * @param D Material matrix (6x6, column-major — i.e. Eigen::Matrix::data() layout).
  * @param Ke Output stiffness matrix (flattened 12x12, row-major).
  * @return Element volume (detJ / 6).
  */
 double compute_tet4_stiffness(
     const double* coords,
-    const Eigen::Matrix<double, 6, 6>& D,
+    const double* D,
     double* Ke
 );
 
