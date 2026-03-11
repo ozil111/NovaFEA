@@ -1,7 +1,0 @@
-Test Results Summary:
-Total Tests: 1
-Passed: 1
-Failed: 0
-
-Detailed Results:
-✓ tet4_mat1_im
