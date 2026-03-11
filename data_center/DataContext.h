@@ -35,6 +35,13 @@ struct DataContext {
     entt::entity output_entity = entt::null;
 
     /**
+     * @brief Command line specified VTU output path (from --output/-o)
+     * @details When non-empty, solver-level default VTU outputs (e.g. result/*.vtu)
+     *          should be suppressed to avoid duplicate result files.
+     */
+    std::string cli_output_vtu_path;
+
+    /**
      * @brief Simdroid Blueprint (原始数据的完整副本)
      * @details 用于在 Export 时保留那些我们未解析/不理解的数据字段，
      * 实现 Round-trip Fidelity (往返保真度)。
@@ -49,6 +56,7 @@ struct DataContext {
         registry.clear();
         analysis_entity = entt::null;
         output_entity = entt::null;
+        cli_output_vtu_path.clear();
         simdroid_blueprint.clear();
     }
 };

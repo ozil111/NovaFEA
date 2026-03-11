@@ -295,7 +295,9 @@ void run_linearstatic_solver(DataContext& data_context) {
     }
 
     // 8) Optional output (single snapshot)
-    const bool do_output = (data_context.output_entity != entt::null &&
+    const bool has_cli_output = !data_context.cli_output_vtu_path.empty();
+    const bool do_output = (!has_cli_output &&
+                            data_context.output_entity != entt::null &&
                             registry.valid(data_context.output_entity));
     if (do_output) {
         std::filesystem::create_directories("result");

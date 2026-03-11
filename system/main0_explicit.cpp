@@ -79,7 +79,9 @@ void run_explicit_solver(DataContext& data_context) {
     }
     spdlog::info("Starting time integration. dt = {:.2e}, total_time = {:.2e}", dt, total_time);
 
-    const bool do_output = (data_context.output_entity != entt::null &&
+    const bool has_cli_output = !data_context.cli_output_vtu_path.empty();
+    const bool do_output = (!has_cli_output &&
+                            data_context.output_entity != entt::null &&
                             data_context.registry.valid(data_context.output_entity));
     double output_interval = (total_time > 0.0 ? total_time / 10.0 : 1.0);
     if (do_output && data_context.registry.all_of<Component::OutputIntervalTime>(data_context.output_entity)) {

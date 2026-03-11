@@ -27,6 +27,7 @@
 #include "exporter_simdroid/SimdroidExporter.h" // Simdroid 导出器
 #include "analysis/GraphBuilder.h"
 #include "analysis/MermaidReporter.h"
+#include "output/VtuExporter.h"          // VTU 结果输出
 #include "main0_explicit.h"              // 显式求解器逻辑
 #include "main0_linearstatic.h"          // 线性静力求解器逻辑
 #include "CommandProcessor.h"            // 命令处理器
@@ -61,7 +62,9 @@ void print_help() {
     std::cout << "Usage: hyperFEM_app [options]" << std::endl;
     std::cout << "Options:" << std::endl;
     std::cout << "  --input-file, -i <file>    Specify input file (.xfem or .json/.jsonc)" << std::endl;
-    std::cout << "  --output-file, -o <file>   Specify output file (.xfem)" << std::endl;
+    std::cout << "  --export, -e <file>        Export preprocessed mesh (.xfem or .jsonc)" << std::endl;
+    std::cout << "  --output, -o <file>        Output result file (.vtu)" << std::endl;
+    std::cout << "  --output-file <file>       [deprecated] Alias for --export (.xfem or .jsonc)" << std::endl;
     std::cout << "  --log-level, -l <level>    Set log level (trace, debug, info, warn, error, critical)" << std::endl;
     std::cout << "  --log-directory, -d <path> Set log file path" << std::endl;
     std::cout << "  --help, -h                 Show this help message" << std::endl;
@@ -72,8 +75,9 @@ void print_help() {
     std::cout << "  .jsonc - JSON with comments (recommended)" << std::endl;
     std::cout << std::endl;
     std::cout << "Examples:" << std::endl;
-    std::cout << "  hyperFEM_app --input-file case/model.jsonc --output-file case/output.xfem" << std::endl;
-    std::cout << "  hyperFEM_app --input-file case/node.xfem --output-file case/output.xfem" << std::endl;
+    std::cout << "  hyperFEM_app --input-file case/model.jsonc --export case/output.xfem" << std::endl;
+    std::cout << "  hyperFEM_app --input-file case/model.jsonc --output case/result.vtu" << std::endl;
+    std::cout << "  hyperFEM_app --input-file case/node.xfem --export case/output.xfem" << std::endl;
 }
 
 // --- 引入交互模式的命令处理器 ---
@@ -93,8 +97,11 @@ int main(int argc, char* argv[]) {
     // 输入文件路径
     std::string input_file_path;
     
-    // 输出文件路径
-    std::string output_file_path;
+    // 导出网格文件路径（旧 --output-file 行为）
+    std::string export_file_path;
+    
+    // 结果输出 .vtu 文件路径（新 output）
+    std::string output_vtu_path;
     
     // 解析命令行参数
     for (int i = 1; i < argc; ++i) {
@@ -144,20 +151,36 @@ int main(int argc, char* argv[]) {
                     std::cerr << "Valid levels: trace, debug, info, warn, error, critical" << std::endl;
                     return 1;
                 }
-            }
-        } else if (arg == "--output-file" || arg == "-o") {
+            } 
+        } else if (arg == "--export" || arg == "--output-file" || arg == "-e") {
             if (i + 1 < argc) {
-                output_file_path = argv[++i];
+                export_file_path = argv[++i];
                 
-                // 验证文件扩展名
-                std::filesystem::path file_path(output_file_path);
-                if (file_path.extension() != ".xfem") {
-                    std::cerr << "Error: Output file must have .xfem extension" << std::endl;
-                    std::cerr << "Provided file: " << output_file_path << std::endl;
+                // 验证文件扩展名（支持 .xfem 和 .jsonc）
+                std::filesystem::path file_path(export_file_path);
+                auto ext = file_path.extension().string();
+                if (ext != ".xfem" && ext != ".jsonc") {
+                    std::cerr << "Error: Export file must have .xfem or .jsonc extension" << std::endl;
+                    std::cerr << "Provided file: " << export_file_path << std::endl;
                     return 1;
                 }
             } else {
-                std::cerr << "Error: --output-file requires a file path argument" << std::endl;
+                std::cerr << "Error: --export/--output-file requires a file path argument" << std::endl;
+                return 1;
+            }
+        } else if (arg == "--output" || arg == "-o") {
+            if (i + 1 < argc) {
+                output_vtu_path = argv[++i];
+
+                // 验证文件扩展名（仅支持 .vtu）
+                std::filesystem::path file_path(output_vtu_path);
+                if (file_path.extension() != ".vtu") {
+                    std::cerr << "Error: Output file must have .vtu extension" << std::endl;
+                    std::cerr << "Provided file: " << output_vtu_path << std::endl;
+                    return 1;
+                }
+            } else {
+                std::cerr << "Error: --output requires a file path argument" << std::endl;
                 return 1;
             }
         } else if (arg == "--log-directory" || arg == "-d") {
@@ -204,6 +227,8 @@ int main(int argc, char* argv[]) {
         
         // 创建DataContext对象来存储解析的数据
         DataContext data_context;
+        // 记录命令行指定的 VTU 输出路径（若有），用于在求解器内部抑制默认 result/*.vtu 输出
+        data_context.cli_output_vtu_path = output_vtu_path;
         
         // 根据文件扩展名自动选择解析器
         std::filesystem::path path(input_file_path);
@@ -243,13 +268,24 @@ int main(int argc, char* argv[]) {
                 run_linearstatic_solver(data_context);
             }
             
-            // --- Step 6: Export the mesh if an output file is specified ---
-            if (!output_file_path.empty()) {
-                spdlog::info("Exporting mesh data to: {}", output_file_path);
-                if (FemExporter::save(output_file_path, data_context)) {
+            // --- Step 6: Export the mesh if an export file is specified ---
+            if (!export_file_path.empty()) {
+                spdlog::info("Exporting mesh data to: {}", export_file_path);
+                if (FemExporter::save(export_file_path, data_context)) {
                     spdlog::info("Successfully exported mesh data.");
                 } else {
-                    spdlog::error("Failed to export mesh data to: {}", output_file_path);
+                    spdlog::error("Failed to export mesh data to: {}", export_file_path);
+                    return 1;
+                }
+            }
+
+            // --- Step 7: Export VTU result if an output file is specified ---
+            if (!output_vtu_path.empty()) {
+                spdlog::info("Exporting VTU result to: {}", output_vtu_path);
+                if (VtuExporter::save(output_vtu_path, data_context, data_context.output_entity)) {
+                    spdlog::info("Successfully exported VTU result.");
+                } else {
+                    spdlog::error("Failed to export VTU result to: {}", output_vtu_path);
                     return 1;
                 }
             }
