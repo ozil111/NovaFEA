@@ -12,3 +12,4 @@ iotools
 .clangd
 test_case/test_benchmark_report.txt
 test_case/test_report.txt
+.venv

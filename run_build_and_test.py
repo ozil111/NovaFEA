@@ -8,6 +8,7 @@ import threading
 import glob
 import shutil
 import locale
+from pathlib import Path
 
 def run_script(script_path, args=[], log_file=None, show_time=False):
     """Runs a script and handles output, logging, and errors."""
@@ -187,10 +188,111 @@ def run_test_script(test_args=[], show_time=False):
         print(f"\n--- TEST SCRIPT SUCCEEDED ---")
         print(f"Tests completed successfully in {int(minutes)}m {int(seconds)}s")
 
+def get_project_venv_python(project_root: str) -> str:
+    """Return python executable from .venv if it exists, otherwise fallback to current interpreter."""
+    project_root_path = Path(project_root)
+    if platform.system() == "Windows":
+        venv_python = project_root_path / ".venv" / "Scripts" / "python.exe"
+    else:
+        venv_python = project_root_path / ".venv" / "bin" / "python"
+
+    if venv_python.is_file():
+        print(f"Using virtual environment Python at: {venv_python}")
+        return str(venv_python)
+
+    # Fallback: current interpreter
+    print("Warning: .venv not found, falling back to current Python interpreter.")
+    return sys.executable
+
+
+def run_integration_tests(project_root: str, show_time: bool = False):
+    """Run integration tests in test_case using the project's .venv if available."""
+    start_time = time.time()
+    elapsed_time = 0
+    timer_thread = None
+    process = None
+
+    # For integration tests, force UTF-8 so symbols like '✓' don't break on GBK consoles.
+    console_encoding = 'utf-8'
+    print(f"Using integration console encoding: {console_encoding}")
+
+    def print_elapsed_time():
+        nonlocal elapsed_time
+        while process and process.poll() is None:
+            elapsed_time = time.time() - start_time
+            minutes, seconds = divmod(elapsed_time, 60)
+            print(f"\r[Integration] Elapsed time: {int(minutes)}m {int(seconds)}s", end="")
+            time.sleep(1)
+
+    project_root_path = Path(project_root)
+    test_script = project_root_path / "test_case" / "test.py"
+    python_exe = get_project_venv_python(project_root)
+
+    command = [python_exe, str(test_script)]
+    print(f"Executing integration tests: {' '.join(command)}")
+
+    # Ensure the child Python process uses UTF-8 for stdio to avoid UnicodeEncodeError with '✓'
+    env = os.environ.copy()
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+
+    try:
+        process = subprocess.Popen(
+            command,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            encoding=console_encoding,
+            errors='replace',
+            env=env,
+            cwd=str(project_root_path),
+        )
+
+        if show_time:
+            timer_thread = threading.Thread(target=print_elapsed_time)
+            timer_thread.daemon = True
+            timer_thread.start()
+
+        # Stream stdout
+        output_lines = []
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break;
+            if line:
+                print(line.rstrip())
+                output_lines.append(line)
+
+        return_code = process.wait()
+        if return_code != 0:
+            stderr = process.stderr.read()
+            if stderr:
+                print(f"\nIntegration tests stderr:\n{stderr}", file=sys.stderr)
+            raise subprocess.CalledProcessError(return_code, command, ''.join(output_lines), stderr)
+
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        elapsed_time = time.time() - start_time
+        minutes, seconds = divmod(elapsed_time, 60)
+
+        print(f"\n--- INTEGRATION TESTS FAILED ---", file=sys.stderr)
+        print(f"Error running integration tests", file=sys.stderr)
+        print(f"Failed in {int(minutes)}m {int(seconds)}s", file=sys.stderr)
+
+        if hasattr(e, 'stderr') and e.stderr:
+            print(f"Error details:\n{e.stderr}", file=sys.stderr)
+
+        sys.exit(e.returncode if hasattr(e, 'returncode') else 1)
+
+    else:
+        elapsed_time = time.time() - start_time
+        minutes, seconds = divmod(elapsed_time, 60)
+        print(f"\n--- INTEGRATION TESTS SUCCEEDED ---")
+        print(f"Integration tests completed successfully in {int(minutes)}m {int(seconds)}s")
+
 def main():
     parser = argparse.ArgumentParser(description="Build and Test Script Runner")
     parser.add_argument('--build', action='store_true', help="Run the build script")
     parser.add_argument('--test', action='store_true', help="Run the test script")
+    parser.add_argument('--itest', action='store_true', help="Run integration tests in test_case using .venv if available")
     parser.add_argument('--mode', choices=['debug', 'release', 'msvc', 'msvc-release'], default='debug', help="Build mode (default: debug)")
     parser.add_argument('--rebuild', action='store_true', help="Clean build directories before building")
     parser.add_argument('--test-target', type=str, default='all', help="Specify a test target to run (use 'all' to run all tests)")
@@ -281,6 +383,12 @@ def main():
         test_args.append(os.path.abspath('.'))
         
         run_test_script(test_args, show_time=True)
+
+    if args.itest:
+        # Use project root for resolving .venv and test_case
+        project_root = os.path.abspath('.')
+        print("Running integration tests (test_case)...")
+        run_integration_tests(project_root, show_time=True)
 
 if __name__ == "__main__":
     main()
