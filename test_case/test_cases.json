@@ -1,0 +1,12 @@
+{
+  "test_cases": [
+    {
+      "name": "tet4_mat1_im",
+      "command": "../bin/Debug/hyperFEM_app.exe",
+      "args":["-i","tet4_mat1_im/tet4_mat1_im.jsonc","--output","tet4_mat1_im/tet4_mat1_im.vtu"],
+      "expected": {
+        "output_contains": ["Application finished successfully"]
+      }
+    }
+  ]
+}
