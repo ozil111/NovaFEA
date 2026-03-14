@@ -3,8 +3,8 @@
  * This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. 
  * If a copy of the MPL was not distributed with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
  *
- * Copyright (c) 2025 hyperFEM. All rights reserved.
- * Author: Xiaotong Wang (or hyperFEM Team)
+ * Copyright (c) 2025 NovaFEA. All rights reserved.
+ * Author: Xiaotong Wang (or NovaFEA Team)
  */
 #include "mesh/element_exporter.h"
 #include "components/mesh_components.h"
@@ -24,7 +24,7 @@ void save(std::ofstream& file, const entt::registry& registry) {
         const auto& elem_type = view.get<const Component::ElementType>(entity);
         const auto& id = view.get<const Component::OriginalID>(entity);
         
-        // 新格式: element_id, element_type, [node_ids]
+        // 新格�? element_id, element_type, [node_ids]
         file << id.value << ", " << elem_type.type_id << ", [";
         
         // Write connectivity (node IDs) inside brackets

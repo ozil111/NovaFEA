@@ -3,8 +3,8 @@
  * This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. 
  * If a copy of the MPL was not distributed with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
  *
- * Copyright (c) 2025 hyperFEM. All rights reserved.
- * Author: Xiaotong Wang (or hyperFEM Team)
+ * Copyright (c) 2025 NovaFEA. All rights reserved.
+ * Author: Xiaotong Wang (or NovaFEA Team)
  */
 #include "AssemblySystem.h"
 #include "../element/c3d8r/C3D8RStiffnessMatrix.h"
@@ -17,7 +17,7 @@
 #include "spdlog/spdlog.h"
 
 // -------------------------------------------------------------------
-// **Dispatcher：根据单元类型分发到相应的刚度矩阵计算函数（高性能版本）**
+// **Dispatcher：根据单元类型分发到相应的刚度矩阵计算函数（高性能版本�?*
 // -------------------------------------------------------------------
 bool AssemblySystem::compute_element_stiffness_dispatcher(
     entt::registry& registry,
@@ -84,7 +84,7 @@ bool AssemblySystem::compute_element_stiffness_dispatcher(
             }
         }
         
-        case 304: {  // Tetra4 (Tet4) — 直接调用纯 C 内核，零 Eigen 开销
+        case 304: {  // Tetra4 (Tet4) �?直接调用�?C 内核，零 Eigen 开销
             const auto& conn = registry.get<Component::Connectivity>(element_entity);
             if (conn.nodes.size() != 4) {
                 spdlog::error("Tet4 stiffness: Connectivity is not 4 nodes");
@@ -120,7 +120,7 @@ bool AssemblySystem::compute_element_stiffness_dispatcher(
 }
 
 // -------------------------------------------------------------------
-// **Assembly Loop：统一的组装循环**
+// **Assembly Loop：统一的组装循�?*
 // -------------------------------------------------------------------
 void AssemblySystem::assemble_stiffness(
     entt::registry& registry,
@@ -128,7 +128,7 @@ void AssemblySystem::assemble_stiffness(
 ) {
     spdlog::info("AssemblySystem: Starting stiffness matrix assembly...");
     
-    // 1. 从 Context 获取现成的 DofMap（必须先运行 DofNumberingSystem）
+    // 1. �?Context 获取现成�?DofMap（必须先运行 DofNumberingSystem�?
     if (!registry.ctx().contains<DofMap>()) {
         spdlog::error("DofMap not found in Context! Please run DofNumberingSystem::build_dof_map() first.");
         K_global.resize(0, 0);
@@ -146,13 +146,13 @@ void AssemblySystem::assemble_stiffness(
     spdlog::info("AssemblySystem: Using DofMap with {} total DOFs", dof_map.num_total_dofs);
     
     // 2. 准备 Triplet 列表（用于高效构建稀疏矩阵）
-    // 优化：对于 C3D8R 单元，每个节点连接约 8 个单元（平均），
-    // 每个节点 3 个自由度，刚度矩阵的一行大概有 3 * 27 ≈ 81 个非零元
+    // 优化：对�?C3D8R 单元，每个节点连接约 8 个单元（平均），
+    // 每个节点 3 个自由度，刚度矩阵的一行大概有 3 * 27 �?81 个非零元
     // 使用 * 60 比较安全（略小于理论上限，避免过度预留）
     std::vector<Triplet> triplets;
     triplets.reserve(dof_map.num_total_dofs * 60);
     
-    // 3. 栈分配单元刚度矩阵缓冲区（row-major），避免任何堆分配
+    // 3. 栈分配单元刚度矩阵缓冲区（row-major），避免任何堆分�?
     double Ke_raw[MAX_ELEMENT_DOFS * MAX_ELEMENT_DOFS];
     int element_dofs = 0;
     
@@ -201,10 +201,10 @@ void AssemblySystem::assemble_stiffness(
     spdlog::info("AssemblySystem: Processed {} elements, skipped {}", element_count, skipped_count);
     spdlog::info("AssemblySystem: Collected {} triplets", triplets.size());
     
-    // 5. 构建全局稀疏矩阵
+    // 5. 构建全局稀疏矩�?
     K_global.resize(dof_map.num_total_dofs, dof_map.num_total_dofs);
     K_global.setFromTriplets(triplets.begin(), triplets.end());
-    K_global.makeCompressed();  // 压缩存储格式，提高后续运算效率
+    K_global.makeCompressed();  // 压缩存储格式，提高后续运算效�?
     
     spdlog::info("AssemblySystem: Global stiffness matrix assembled: {}x{} with {} non-zeros",
                 K_global.rows(), K_global.cols(), K_global.nonZeros());

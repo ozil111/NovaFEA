@@ -1,6 +1,6 @@
 # vcpkg Installation Scripts
 
-This directory contains scripts to install vcpkg dependencies for the hyperFEM project.
+This directory contains scripts to install vcpkg dependencies for the NovaFEA project.
 
 ## Scripts
 

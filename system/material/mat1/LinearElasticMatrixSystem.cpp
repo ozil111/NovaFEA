@@ -3,8 +3,8 @@
  * This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. 
  * If a copy of the MPL was not distributed with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
  *
- * Copyright (c) 2025 hyperFEM. All rights reserved.
- * Author: Xiaotong Wang (or hyperFEM Team)
+ * Copyright (c) 2025 NovaFEA. All rights reserved.
+ * Author: Xiaotong Wang (or NovaFEA Team)
  */
 #include "LinearElasticMatrixSystem.h"
 #include "spdlog/spdlog.h"
@@ -15,14 +15,14 @@
 void LinearElasticMatrixSystem::compute_linear_elastic_matrix(entt::registry& registry) {
     spdlog::info("LinearElasticMatrixSystem: Computing D matrices for linear elastic materials...");
     
-    // 获取所有具有 LinearElasticParams 的材料实体
+    // 获取所有具�?LinearElasticParams 的材料实�?
     auto material_view = registry.view<const Component::LinearElasticParams>();
     
     size_t material_count = 0;
     for (auto material_entity : material_view) {
         const auto& params = material_view.get<const Component::LinearElasticParams>(material_entity);
         
-        // 检查参数有效性
+        // 检查参数有效�?
         if (params.E <= 0.0) {
             spdlog::warn("Material entity {} has invalid Young's modulus E = {}", 
                         static_cast<std::uint64_t>(material_entity), params.E);
@@ -41,7 +41,7 @@ void LinearElasticMatrixSystem::compute_linear_elastic_matrix(entt::registry& re
         // 构建 D 矩阵
         Eigen::Matrix<double, 6, 6> D = build_d_matrix_3d_isotropic(lambda, mu);
         
-        // 获取或创建 LinearElasticMatrix 组件
+        // 获取或创�?LinearElasticMatrix 组件
         auto& matrix_comp = registry.get_or_emplace<Component::LinearElasticMatrix>(material_entity);
         matrix_comp.D = D;
         matrix_comp.is_initialized = true;
@@ -77,7 +77,7 @@ Eigen::Matrix<double, 6, 6> LinearElasticMatrixSystem::build_d_matrix_3d_isotrop
     
     // 填充主对角块 (3x3)
     double diag_value = lambda + 2.0 * mu;  // 对角元素
-    double off_diag_value = lambda;         // 非对角元素
+    double off_diag_value = lambda;         // 非对角元�?
     
     D(0, 0) = diag_value;      // xx-xx
     D(1, 1) = diag_value;      // yy-yy
@@ -90,7 +90,7 @@ Eigen::Matrix<double, 6, 6> LinearElasticMatrixSystem::build_d_matrix_3d_isotrop
     D(2, 0) = off_diag_value;  // zz-xx
     D(2, 1) = off_diag_value;  // zz-yy
     
-    // 填充剪切项 (3x3 块)
+    // 填充剪切�?(3x3 �?
     D(3, 3) = mu;  // xy-xy
     D(4, 4) = mu;  // yz-yz
     D(5, 5) = mu;  // xz-xz

@@ -3,8 +3,8 @@
  * This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. 
  * If a copy of the MPL was not distributed with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
  *
- * Copyright (c) 2025 hyperFEM. All rights reserved.
- * Author: Xiaotong Wang (or hyperFEM Team)
+ * Copyright (c) 2025 NovaFEA. All rights reserved.
+ * Author: Xiaotong Wang (or NovaFEA Team)
  */
 #include "mesh/set_exporter.h"
 #include "components/mesh_components.h"
@@ -36,7 +36,7 @@ void save_node_sets(std::ofstream& file, const entt::registry& registry) {
         }
         if (ids.empty()) continue;
 
-        // 新格式: set_id, set_name, [member_ids]
+        // 新格�? set_id, set_name, [member_ids]
         file << set_id << ", " << set_name.value << ", [";
         
         // Write member node IDs inside brackets
@@ -80,7 +80,7 @@ void save_element_sets(std::ofstream& file, const entt::registry& registry) {
         }
         if (ids.empty()) continue;
 
-        // 新格式: set_id, set_name, [member_ids]
+        // 新格�? set_id, set_name, [member_ids]
         file << set_id << ", " << set_name.value << ", [";
         
         // Write member element IDs inside brackets

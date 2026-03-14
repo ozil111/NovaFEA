@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "===== hyperFEM Test Runner ====="
+echo "===== NovaFEA Test Runner ====="
 
 # Parse command line arguments
 BUILD_TYPE="Debug"

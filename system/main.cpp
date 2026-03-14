@@ -2,14 +2,14 @@
  * This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. 
  * If a copy of the MPL was not distributed with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
  *
- * Copyright (c) 2025 hyperFEM. All rights reserved.
- * Author: Xiaotong Wang (or hyperFEM Team)
+ * Copyright (c) 2025 NovaFEA. All rights reserved.
+ * Author: Xiaotong Wang (or NovaFEA Team)
  */
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/basic_file_sink.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
-#include "parser_base/parserBase.h"       // 旧的 .xfem 解析器（向后兼容）
-#include "parser_json/JsonParser.h"       // 新的 JSON 解析器
+#include "parser_base/parserBase.h"       // 旧的 .xfem 解析器（向后兼容�?
+#include "parser_json/JsonParser.h"       // 新的 JSON 解析�?
 #include "exporter_base/exporterBase.h"
 #include "DataContext.h"                  // 引入ECS数据中心
 #include "components/mesh_components.h"   // 引入组件定义
@@ -21,16 +21,16 @@
 #include "mass/MassSystem.h"             // 质量系统
 #include "force/InternalForceSystem.h"   // 内力系统
 #include "load/LoadSystem.h"             // 载荷系统
-#include "explicit/ExplicitSolver.h"     // 显式求解器
+#include "explicit/ExplicitSolver.h"     // 显式求解�?
 #include "material/mat1/LinearElasticMatrixSystem.h"  // 材料矩阵系统
-#include "parser_simdroid/SimdroidParser.h" // Simdroid 解析器
-#include "exporter_simdroid/SimdroidExporter.h" // Simdroid 导出器
+#include "parser_simdroid/SimdroidParser.h" // Simdroid 解析�?
+#include "exporter_simdroid/SimdroidExporter.h" // Simdroid 导出�?
 #include "analysis/GraphBuilder.h"
 #include "analysis/MermaidReporter.h"
 #include "output/VtuExporter.h"          // VTU 结果输出
 #include "main0_explicit.h"              // 显式求解器逻辑
 #include "main0_linearstatic.h"          // 线性静力求解器逻辑
-#include "CommandProcessor.h"            // 命令处理器
+#include "CommandProcessor.h"            // 命令处理�?
 #include <iostream>
 #include <string>
 #include <memory>
@@ -43,15 +43,13 @@
 void print_banner() {
     // You can use an online ASCII art generator to create your own style
     std::cout << R"(
-    .__                              ______________________   _____   
-    |  |__ ___.__.______   __________\_   _____/\_   _____/  /     \
-    |  |  <   |  |\____ \_/ __ \_  __ \    __)   |    __)_  /  \ /  \
-    |   Y  \___  ||  |_> >  ___/|  | \/     \    |        \/    Y    \
-    |___|  / ____||   __/ \___  >__|  \___  /   /_______  /\____|__  /
-        \/\/     |__|        \/          \/            \/         \/ 
-
+    _   __                 ______  ______      _    
+   / | / /___ _   ______ _/ ____/ / ____/___ _/ |   
+  /  |/ / __ \ | / / __ `/ /_    / __/ / __ `/ /    
+ / /|  / /_/ / |/ / /_/ / __/   / /___/ /_/ / /     
+/_/ |_/\____/|___/\__,_/_/    /_____/\__,_/_/      
 )" << std::endl;
-    std::cout << "  hyperFEM Version: 0.0.1" << std::endl;
+    std::cout << "  NovaFEA Version: 0.0.1" << std::endl;
     std::cout << "  Author: xiaotong wang" << std::endl;
     std::cout << "  Email:  xiaotongwang98@gmail.com" << std::endl;
     std::cout << "---------------------------------------------------------" << std::endl << std::endl;
@@ -59,7 +57,7 @@ void print_banner() {
 
 // Function to print help information
 void print_help() {
-    std::cout << "Usage: hyperFEM_app [options]" << std::endl;
+    std::cout << "Usage: NovaFEA_app [options]" << std::endl;
     std::cout << "Options:" << std::endl;
     std::cout << "  --input-file, -i <file>    Specify input file (.xfem or .json/.jsonc)" << std::endl;
     std::cout << "  --export, -e <file>        Export preprocessed mesh (.xfem or .jsonc)" << std::endl;
@@ -75,9 +73,9 @@ void print_help() {
     std::cout << "  .jsonc - JSON with comments (recommended)" << std::endl;
     std::cout << std::endl;
     std::cout << "Examples:" << std::endl;
-    std::cout << "  hyperFEM_app --input-file case/model.jsonc --export case/output.xfem" << std::endl;
-    std::cout << "  hyperFEM_app --input-file case/model.jsonc --output case/result.vtu" << std::endl;
-    std::cout << "  hyperFEM_app --input-file case/node.xfem --export case/output.xfem" << std::endl;
+    std::cout << "  NovaFEA_app --input-file case/model.jsonc --export case/output.xfem" << std::endl;
+    std::cout << "  NovaFEA_app --input-file case/model.jsonc --output case/result.vtu" << std::endl;
+    std::cout << "  NovaFEA_app --input-file case/node.xfem --export case/output.xfem" << std::endl;
 }
 
 // --- 引入交互模式的命令处理器 ---
@@ -92,18 +90,18 @@ int main(int argc, char* argv[]) {
     spdlog::level::level_enum log_level = spdlog::level::info;
     
     // 默认日志文件路径
-    std::string log_file_path = "logs/hyperFEM.log";
+    std::string log_file_path = "logs/NovaFEA.log";
     
     // 输入文件路径
     std::string input_file_path;
     
-    // 导出网格文件路径（旧 --output-file 行为）
+    // 导出网格文件路径（旧 --output-file 行为�?
     std::string export_file_path;
     
-    // 结果输出 .vtu 文件路径（新 output）
+    // 结果输出 .vtu 文件路径（新 output�?
     std::string output_vtu_path;
     
-    // 解析命令行参数
+    // 解析命令行参�?
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--help" || arg == "-h") {
@@ -113,7 +111,7 @@ int main(int argc, char* argv[]) {
             if (i + 1 < argc) {
                 input_file_path = argv[++i];
                 
-                // 验证文件扩展名（支持 .xfem, .json, .jsonc）
+                // 验证文件扩展名（支持 .xfem, .json, .jsonc�?
                 std::filesystem::path file_path(input_file_path);
                 std::string extension = file_path.extension().string();
                 if (extension != ".xfem" && extension != ".json" && extension != ".jsonc") {
@@ -156,7 +154,7 @@ int main(int argc, char* argv[]) {
             if (i + 1 < argc) {
                 export_file_path = argv[++i];
                 
-                // 验证文件扩展名（支持 .xfem 和 .jsonc）
+                // 验证文件扩展名（支持 .xfem �?.jsonc�?
                 std::filesystem::path file_path(export_file_path);
                 auto ext = file_path.extension().string();
                 if (ext != ".xfem" && ext != ".jsonc") {
@@ -172,7 +170,7 @@ int main(int argc, char* argv[]) {
             if (i + 1 < argc) {
                 output_vtu_path = argv[++i];
 
-                // 验证文件扩展名（仅支持 .vtu）
+                // 验证文件扩展名（仅支�?.vtu�?
                 std::filesystem::path file_path(output_vtu_path);
                 if (file_path.extension() != ".vtu") {
                     std::cerr << "Error: Output file must have .vtu extension" << std::endl;
@@ -197,7 +195,7 @@ int main(int argc, char* argv[]) {
         }
     }
     
-    // 创建多个sink：文件和控制台
+    // 创建多个sink：文件和控制�?
     std::vector<spdlog::sink_ptr> sinks;
     
     // 文件输出sink - 输出到用户指定的日志文件
@@ -208,8 +206,8 @@ int main(int argc, char* argv[]) {
     auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
     sinks.push_back(console_sink);
     
-    // 创建logger并注册
-    auto logger = std::make_shared<spdlog::logger>("hyperFEM", begin(sinks), end(sinks));
+    // 创建logger并注�?
+    auto logger = std::make_shared<spdlog::logger>("NovaFEA", begin(sinks), end(sinks));
     logger->set_level(log_level);
     logger->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] %v");
     spdlog::set_default_logger(logger);
@@ -219,7 +217,7 @@ int main(int argc, char* argv[]) {
     spdlog::info("Log level set to: {}", spdlog::level::to_string_view(log_level));
     
     // --- Step 4: 模式决策 ---
-    // 根据是否提供了 --input-file 来决定进入哪种模式
+    // 根据是否提供�?--input-file 来决定进入哪种模�?
     if (!input_file_path.empty()) {
         // --- BATCH MODE EXECUTION ---
         spdlog::info("Running in Batch Mode.");
@@ -227,10 +225,10 @@ int main(int argc, char* argv[]) {
         
         // 创建DataContext对象来存储解析的数据
         DataContext data_context;
-        // 记录命令行指定的 VTU 输出路径（若有），用于在求解器内部抑制默认 result/*.vtu 输出
+        // 记录命令行指定的 VTU 输出路径（若有），用于在求解器内部抑制默�?result/*.vtu 输出
         data_context.cli_output_vtu_path = output_vtu_path;
         
-        // 根据文件扩展名自动选择解析器
+        // 根据文件扩展名自动选择解析�?
         std::filesystem::path path(input_file_path);
         std::string extension = path.extension().string();
         bool parse_success = false;
@@ -303,15 +301,15 @@ int main(int argc, char* argv[]) {
         std::string command_line;
         
         while (session.is_running) {
-            std::cout << "hyperFEM> " << std::flush;
+            std::cout << "NovaFEA> " << std::flush;
             if (std::getline(std::cin, command_line)) {
                 if (!command_line.empty()) {
                     process_command(command_line, session);
                 }
             } else {
-                // 处理 Ctrl+D (Unix) 或 Ctrl+Z (Windows) 结束输入
+                // 处理 Ctrl+D (Unix) �?Ctrl+Z (Windows) 结束输入
                 session.is_running = false;
-                std::cout << std::endl; // 换行以保持终端整洁
+                std::cout << std::endl; // 换行以保持终端整�?
             }
         }
     }

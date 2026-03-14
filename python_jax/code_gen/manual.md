@@ -92,7 +92,7 @@ inline void compute_tet4_Ke(const double* in, double* out) {
 
 ## 5. Integration Example (Conceptual C++)
 
-To use the generated kernels in your main C++ application (e.g., `hyperfem`), you would include or link the generated files and call the functions in sequence.
+To use the generated kernels in your main C++ application (e.g., `NovaFEA`), you would include or link the generated files and call the functions in sequence.
 
 ```cpp
 // main_fea_solver.cpp

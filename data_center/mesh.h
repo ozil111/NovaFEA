@@ -3,15 +3,15 @@
  * This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. 
  * If a copy of the MPL was not distributed with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
  *
- * Copyright (c) 2025 hyperFEM. All rights reserved.
- * Author: Xiaotong Wang (or hyperFEM Team)
+ * Copyright (c) 2025 NovaFEA. All rights reserved.
+ * Author: Xiaotong Wang (or NovaFEA Team)
  */
 #pragma once
 #include <vector>
 #include <unordered_map>
 #include <string> // Added for Set Name/ID mapping if needed later
 
-// 使用类型别名增强代码可读性和可维护性
+// 使用类型别名增强代码可读性和可维护�?
 using NodeID = int;
 using ElementID = int;
 using SetID = int; // Add new type alias for Set ID

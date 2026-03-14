@@ -3,8 +3,8 @@
  * This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. 
  * If a copy of the MPL was not distributed with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
  *
- * Copyright (c) 2025 hyperFEM. All rights reserved.
- * Author: Xiaotong Wang (or hyperFEM Team)
+ * Copyright (c) 2025 NovaFEA. All rights reserved.
+ * Author: Xiaotong Wang (or NovaFEA Team)
  */
 #include "output/VtuExporter.h"
 #include "DataContext.h"
@@ -19,7 +19,7 @@
 
 namespace {
 
-/** 内部 type_id -> VTK cell type。参见 docs/vtu_format.md（八节点六面体 = 12）。*/
+/** 内部 type_id -> VTK cell type。参考 docs/vtu_format.md（八节点六面体 = 12）。*/
 int toVtkCellType(int type_id) {
     switch (type_id) {
         case 304: return 10;   // Tetra4  -> VTK_TETRA
@@ -27,7 +27,7 @@ int toVtkCellType(int type_id) {
         case 308: return 12;   // Hexa8   -> VTK_HEXAHEDRON
         case 310: return 24;   // Tetra10 -> VTK_QUADRATIC_TETRA
         case 320: return 25;   // Hexa20  -> VTK_QUADRATIC_HEXAHEDRON
-        default:  return 12;   // 未知时按 Hexa8 处理，避免写坏文件
+        default:  return 12;   // 未知时按 Hexa8 处理，避免写坏文�?
     }
 }
 
@@ -52,7 +52,7 @@ bool VtuExporter::save(const std::string& filepath, const DataContext& data_cont
         return false;
     }
 
-    // 稳定顺序：先收集所有节点实体，再建 entity -> 点下标
+    // 稳定顺序：先收集所有节点实体，再建 entity -> 点下�?
     std::vector<entt::entity> node_entities;
     node_entities.reserve(num_points);
     for (auto e : pos_view)
@@ -147,7 +147,7 @@ bool VtuExporter::save(const std::string& filepath, const DataContext& data_cont
             elem_fields = &registry.get<Component::ElementOutput>(output_entity).element_output;
     }
 
-    // --- PointData: 仅写出 output 指定的节点场（无指定时默认写 Displacement）---
+    // --- PointData: 仅写�?output 指定的节点场（无指定时默认写 Displacement�?--
     {
         XMLElement* pointData = doc.NewElement("PointData");
         piece->InsertEndChild(pointData);
@@ -205,17 +205,17 @@ bool VtuExporter::save(const std::string& filepath, const DataContext& data_cont
             da->SetText(os.str().c_str());
             pointData->InsertEndChild(da);
         }
-        // TODO: Reaction Force (PointData) — 需在 data_center 提供对应组件后再写入
+        // TODO: Reaction Force (PointData) �?需�?data_center 提供对应组件后再写入
     }
 
-    // --- CellData: 仅写出 output 指定的单元场；Stress/Strain/Mises 等尚待组件支持 ---
+    // --- CellData: 仅写�?output 指定的单元场；Stress/Strain/Mises 等尚待组件支�?---
     {
         XMLElement* cellData = doc.NewElement("CellData");
         piece->InsertEndChild(cellData);
         if (elem_fields) {
             for (const std::string& name : *elem_fields) {
                 if (name == "Stress" || name == "Strain" || name == "Mises" || name == "Equivalent") {
-                    // TODO: 需在 data_center 提供对应单元分量后再写入
+                    // TODO: 需�?data_center 提供对应单元分量后再写入
                     (void)name;
                 }
             }

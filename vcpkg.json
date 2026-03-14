@@ -1,5 +1,5 @@
 {
-  "name": "hyperfem",
+  "name": "novafea",
   "version-string": "0.1.0",
   "dependencies": [
     "fmt",

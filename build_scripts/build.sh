@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "===== hyperFEM Build Script ====="
+echo "===== NovaFEA Build Script ====="
 
 # Check if CMake is installed
 if ! command -v cmake &> /dev/null; then

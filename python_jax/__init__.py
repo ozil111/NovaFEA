@@ -1,5 +1,5 @@
 """
-HyperFEM: 基于JAX的显式动力学有限元求解器
+NovaFEA: 基于JAX的显式动力学有限元求解器
 """
 from .builder import build_solver_step
 from .main import run_simulation

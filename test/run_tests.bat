@@ -1,7 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 
-echo ===== hyperFEM Test Runner =====
+echo ===== NovaFEA Test Runner =====
 
 :: Parse command line arguments
 set BUILD_TYPE=Debug

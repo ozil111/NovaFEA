@@ -1,6 +1,6 @@
-# hyperFEM Build Guide
+# NovaFEA Build Guide
 
-This document describes how to use build scripts to compile and run the hyperFEM project.
+This document describes how to use build scripts to compile and run the NovaFEA project.
 
 ## Prerequisites
 

@@ -2,8 +2,8 @@
  * This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. 
  * If a copy of the MPL was not distributed with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
  *
- * Copyright (c) 2025 hyperFEM. All rights reserved.
- * Author: Xiaotong Wang (or hyperFEM Team)
+ * Copyright (c) 2025 NovaFEA. All rights reserved.
+ * Author: Xiaotong Wang (or NovaFEA Team)
  */
 #include "CommandProcessor.h"
 #include "spdlog/spdlog.h"
@@ -27,7 +27,7 @@
 
 namespace {
 
-// 基础查找辅助：节点 / 单元 / 集合
+// 基础查找辅助：节�?/ 单元 / 集合
 entt::entity find_node_by_id(entt::registry& registry, int nid) {
     auto view = registry.view<const Component::NodeID>();
     for (auto e : view) {
@@ -69,7 +69,7 @@ entt::entity get_or_create_set_entity(entt::registry& registry, const std::strin
 int infer_element_type_from_node_count(std::size_t count) {
     if (count == 2) return 102;   // Line2
     if (count == 3) return 203;   // Tri3
-    if (count == 4) return 304;   // Tet4 / Quad4，默认按体单元处理
+    if (count == 4) return 304;   // Tet4 / Quad4，默认按体单元处�?
     if (count == 8) return 308;   // Hex8
     if (count == 10) return 310;  // Tet10
     if (count == 20) return 320;  // Hex20
@@ -98,7 +98,7 @@ void process_command(const std::string& command_line, AppSession& session) {
 
     if (command == "quit" || command == "exit") {
         session.is_running = false;
-        spdlog::info("Exiting hyperFEM. Goodbye!");
+        spdlog::info("Exiting NovaFEA. Goodbye!");
     }
     else if (command == "help") {
         spdlog::info("Available commands: import, import_simdroid, export_simdroid, "
@@ -118,7 +118,7 @@ void process_command(const std::string& command_line, AppSession& session) {
             return;
         }
         
-        // 检查文件是否存在
+        // 检查文件是否存�?
         if (!std::filesystem::exists(file_path)) {
             spdlog::error("File does not exist: {}", file_path);
             return;
@@ -127,7 +127,7 @@ void process_command(const std::string& command_line, AppSession& session) {
         session.clear_data();
         spdlog::info("Importing mesh from: {}", file_path);
         
-        // 根据文件扩展名自动选择解析器
+        // 根据文件扩展名自动选择解析�?
         std::filesystem::path path(file_path);
         std::string extension = path.extension().string();
         bool parse_success = false;
@@ -170,7 +170,7 @@ void process_command(const std::string& command_line, AppSession& session) {
             return;
         }
 
-        // 自动推导 mesh.dat 路径 (假设在同级目录)
+        // 自动推导 mesh.dat 路径 (假设在同级目�?
         std::filesystem::path mesh_path = control_path.parent_path() / "mesh.dat";
         if (!std::filesystem::exists(mesh_path)) {
             spdlog::error("Mesh file not found at expected location: {}", mesh_path.string());
@@ -189,7 +189,7 @@ void process_command(const std::string& command_line, AppSession& session) {
             if (SimdroidParser::parse(mesh_path.string(), control_path.string(), session.data)) {
                 session.mesh_loaded = true;
 
-                // 核心步骤：导入成功后，立即构建 Inspector 索引
+                // 核心步骤：导入成功后，立即构�?Inspector 索引
                 session.inspector.build(session.data.registry);
 
                 spdlog::info("Simdroid import successful. Entered Simdroid Interactive Mode.");
@@ -227,7 +227,7 @@ void process_command(const std::string& command_line, AppSession& session) {
                 mesh_path = std::filesystem::path(arg1);
                 control_path = std::filesystem::path(arg2);
             } else {
-                // 只给一个参数时，按扩展名推导
+                // 只给一个参数时，按扩展名推�?
                 std::filesystem::path out(arg1);
                 const std::string ext = out.extension().string();
 
@@ -370,7 +370,7 @@ void process_command(const std::string& command_line, AppSession& session) {
         }
     }
     // =======================================================
-    // 新增: Simdroid 交互式调试面板
+    // 新增: Simdroid 交互式调试面�?
     // =======================================================
     else if (command == "list_parts") {
         if (!session.mesh_loaded) { spdlog::warn("No mesh loaded."); return; }
@@ -394,7 +394,7 @@ void process_command(const std::string& command_line, AppSession& session) {
         size_t deleted = 0;
         size_t failed = 0;
         for (const auto& part_name : part_names) {
-            // delete_part() 会清空 inspector 索引；为保证多次删除稳定，这里每次都先重建索引
+            // delete_part() 会清�?inspector 索引；为保证多次删除稳定，这里每次都先重建索�?
             session.inspector.build(session.data.registry);
 
             if (session.inspector.delete_part(session.data.registry, part_name)) {
@@ -409,7 +409,7 @@ void process_command(const std::string& command_line, AppSession& session) {
         if (deleted > 0) {
             // 删除后必须重建索引，否则 eid_to_part 等映射会失效导致 Crash
             session.inspector.build(session.data.registry);
-            // 拓扑数据会因实体删除而失效，清理以避免后续误用
+            // 拓扑数据会因实体删除而失效，清理以避免后续误�?
             if (session.data.registry.ctx().contains<std::unique_ptr<TopologyData>>()) {
                 session.data.registry.ctx().erase<std::unique_ptr<TopologyData>>();
             }
@@ -429,10 +429,10 @@ void process_command(const std::string& command_line, AppSession& session) {
 
         spdlog::info("Analyzing connectivity...");
 
-        // 1. 构建图
+        // 1. 构建�?
         PartGraph graph = GraphBuilder::build(session.data.registry, session.inspector);
 
-        // 2. (可选) 进行一些统计分析，比如打印孤立节点
+        // 2. (可�? 进行一些统计分析，比如打印孤立节点
         int isolated_count = 0;
         for (const auto& [n, node] : graph.nodes) {
             if (node.edges.empty()) isolated_count++;
@@ -442,7 +442,7 @@ void process_command(const std::string& command_line, AppSession& session) {
         // 3. 生成报告
         MermaidReporter::generate_interactive_html(graph, output_filename);
 
-        // 4. (可选) 尝试自动打开浏览器 (Windows/Linux/Mac)
+        // 4. (可�? 尝试自动打开浏览�?(Windows/Linux/Mac)
 #ifdef _WIN32
         std::string cmd = "start " + output_filename;
         system(cmd.c_str());
@@ -515,7 +515,7 @@ void process_command(const std::string& command_line, AppSession& session) {
         pos.y = y;
         pos.z = z;
         spdlog::info("Node {} moved to ({}, {}, {}).", nid, x, y, z);
-        // 拓扑结构不变，仅坐标变化，不必重建拓扑 / 索引
+        // 拓扑结构不变，仅坐标变化，不必重建拓�?/ 索引
     }
     else if (command == "node_delete") {
         if (!session.mesh_loaded) {
@@ -612,7 +612,7 @@ void process_command(const std::string& command_line, AppSession& session) {
             spdlog::error("Element {} not found.", eid);
             return;
         }
-        // 移除与该单元关联的 Surface
+        // 移除与该单元关联�?Surface
         {
             std::vector<entt::entity> surfaces_to_delete;
             auto surf_view = registry.view<const Component::SurfaceParentElement>();
@@ -623,7 +623,7 @@ void process_command(const std::string& command_line, AppSession& session) {
                 }
             }
             if (!surfaces_to_delete.empty()) {
-                // 从所有 SurfaceSetMembers 中移除
+                // 从所�?SurfaceSetMembers 中移�?
                 std::unordered_set<entt::entity> surf_set(surfaces_to_delete.begin(), surfaces_to_delete.end());
                 auto sset_view = registry.view<Component::SurfaceSetMembers>();
                 for (auto set_e : sset_view) {
@@ -640,7 +640,7 @@ void process_command(const std::string& command_line, AppSession& session) {
                 }
             }
         }
-        // 从所有 ElementSetMembers 中移除该单元
+        // 从所�?ElementSetMembers 中移除该单元
         {
             auto eset_view = registry.view<Component::ElementSetMembers>();
             for (auto set_e : eset_view) {

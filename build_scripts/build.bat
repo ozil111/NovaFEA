@@ -1,7 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 
-echo ===== hyperFEM Build Script =====
+echo ===== NovaFEA Build Script =====
 
 :: Check if CMake is installed
 where cmake >nul 2>nul

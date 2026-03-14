@@ -3,8 +3,8 @@
  * This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. 
  * If a copy of the MPL was not distributed with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
  *
- * Copyright (c) 2025 hyperFEM. All rights reserved.
- * Author: Xiaotong Wang (or hyperFEM Team)
+ * Copyright (c) 2025 NovaFEA. All rights reserved.
+ * Author: Xiaotong Wang (or NovaFEA Team)
  */
 #pragma once
 
@@ -12,7 +12,7 @@
 #include <unordered_map>
 #include <stdexcept>
 
-// 单元类型的固定属性
+// 单元类型的固定属�?
 struct ElementProperties {
     int numNodes;
     int dimension;
@@ -24,11 +24,11 @@ class ElementRegistry {
 public:
     // 获取全局唯一的注册表实例
     static ElementRegistry& getInstance() {
-        static ElementRegistry instance; // C++11保证线程安全初始化
+        static ElementRegistry instance; // C++11保证线程安全初始�?
         return instance;
     }
 
-    // 根据类型ID获取单元属性
+    // 根据类型ID获取单元属�?
     const ElementProperties& getProperties(int typeId) const {
         auto it = propertiesMap.find(typeId);
         if (it == propertiesMap.end()) {
@@ -51,13 +51,13 @@ private:
         propertiesMap[204] = {4, 2, "Quad4"};
         propertiesMap[208] = {8, 2, "Quad8"};
         propertiesMap[304] = {4, 3, "Tetra4"};
-        propertiesMap[306] = {6, 3, "Penta6"}; // 注意：306通常是三棱柱(Wedge/Penta)，不是金字塔
+        propertiesMap[306] = {6, 3, "Penta6"}; // 注意�?06通常是三棱柱(Wedge/Penta)，不是金字塔
         propertiesMap[308] = {8, 3, "Hexa8"};
         propertiesMap[310] = {10, 3, "Tetra10"};
         propertiesMap[320] = {20, 3, "Hexa20"};
     }
 
-    // 禁止拷贝和赋值
+    // 禁止拷贝和赋�?
     ElementRegistry(const ElementRegistry&) = delete;
     ElementRegistry& operator=(const ElementRegistry&) = delete;
 

@@ -319,7 +319,7 @@ void render_panel(entt::registry& reg, entt::entity e, SimdroidInspector* insp,
 
     Element document = vbox({
         hbox({
-            text(" hyperFEM ") | bgcolor(Color::Blue) | color(Color::White) | bold,
+            text(" NovaFEA ") | bgcolor(Color::Blue) | color(Color::White) | bold,
             text(" Universal Inspector ") | color(Color::Cyan),
             filler(),
             text("Entity ID: " + std::to_string(entt::to_integral(e))) | dim
