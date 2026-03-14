@@ -12,9 +12,9 @@ sys.path.append(str(Path(__file__).parent.resolve()))
 from definitions.abc import Element, Material
 
 
-# --------------------------------------------------------------------------- 
+# ---------------------------------------------------------------------------
 # 数据容器 + 静态编译分发
-# --------------------------------------------------------------------------- 
+# ---------------------------------------------------------------------------
 class MathModel:
     """数据容器：存储数学定义"""
     def __init__(self, inputs, outputs, name="kernel", input_names=None):
@@ -88,7 +88,7 @@ class FEACompiler:
 
         comment_lines.append(" * ")
         comment_lines.append(" * @param out Output array (double*). Layout:")
-        comment_lines.append(f" *   - out[0..{len(model.outputs)-1}]: Flattened {model.name} matrix, row-major order.")
+        comment_lines.append(f" *   - out[0..{len(model.outputs)-1}]: Flattened result, row-major order.")
         comment_lines.append(" */")
         comment_block = "\n".join(comment_lines)
 
@@ -97,7 +97,7 @@ class FEACompiler:
         for var, expr in sub_exprs:
             body_lines.append(f"    double {var} = {ccode(expr)};")
 
-        body_lines.append("\n    // --- Output Assignment ---")
+        body_lines.append("\n    # --- Output Assignment ---")
 
         for i, out_expr in enumerate(simplified_outputs):
             body_lines.append(f"    out[{i}] = {ccode(out_expr)};")
@@ -105,19 +105,19 @@ class FEACompiler:
         func_type = "__device__ void" if is_cuda else "inline void"
         body = "\n".join(body_lines)
         
-        return f"{comment_block}\n{func_type} compute_{model.name}(const double* in, double* out) {{\n{body}\n}}"
+        return f"{comment_block}\n{func_type} compute_{model.name}(const double* in, double* out) {{ {body}\n}}"
 
 
-# --------------------------------------------------------------------------- 
+# ---------------------------------------------------------------------------
 # 动态模型加载
-# --------------------------------------------------------------------------- 
+# ---------------------------------------------------------------------------
 def _load_class(module_path: str, class_name: str):
     """动态加载类"""
     try:
         module = importlib.import_module(module_path)
         return getattr(module, class_name)
-    except (ModuleNotFoundError, AttributeError):
-        raise ImportError(f"Could not find class '{class_name}' in module '{module_path}'")
+    except (ModuleNotFoundError, AttributeError) as e:
+        raise ImportError(f"Could not find class '{class_name}' in module '{module_path}'.\nError: {e}")
 
 def load_element(name: str) -> Element:
     """Loads an element class from the definitions.elements directory."""
@@ -144,39 +144,52 @@ def _default_output(model_name: str, target: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="SymPy FEA 代码生成：输入 Element+Material，输出 cpp/cuda/jax 源码文件。"
+        description="SymPy FEA 代码生成器 (混合解耦架构)"
+    )
+    parser.add_argument(
+        "--task",
+        required=True,
+        choices=["constitutive", "stiffness"],
+        help="生成任务: 'constitutive' (材料D矩阵) 或 'stiffness' (单元Ke矩阵)",
     )
     parser.add_argument(
         "--element", "-e",
-        required=True,
-        help="单元名称 (e.g., 'tet4')",
+        help="单元名称 (e.g., 'tet4'), required for --task=stiffness",
     )
     parser.add_argument(
         "--material", "-m",
-        required=True,
-        help="材料名称 (e.g., 'isotropic')",
+        help="材料名称 (e.g., 'isotropic'), required for --task=constitutive",
     )
     parser.add_argument(
         "--target", "-t",
         required=True,
         choices=["jax", "cpp", "cuda", "all"],
-        help="目标：jax / cpp / cuda / all",
+        help="目标语言：jax / cpp / cuda / all",
     )
     parser.add_argument(
         "--output", "-o",
         default=None,
-        help="输出文件路径（默认根据 model+target 生成）",
+        help="输出文件路径（默认根据任务和名称生成）",
     )
     args = parser.parse_args()
 
-    # 1. Load models
-    element = load_element(args.element)
-    material = load_material(args.material)
+    model = None
+    if args.task == "constitutive":
+        if not args.material:
+            parser.error("--material is required for --task=constitutive")
+        material = load_material(args.material)
+        model = material.get_constitutive_model()
 
-    # 2. Get symbolic math model
-    model = element.get_symbolic_model(material)
-    
-    # 3. Compile
+    elif args.task == "stiffness":
+        if not args.element:
+            parser.error("--element is required for --task=stiffness")
+        element = load_element(args.element)
+        model = element.get_stiffness_model()
+
+    if model is None:
+        raise ValueError("Failed to generate a MathModel for the given task.")
+
+    # Compile
     target = args.target
     if target == "all":
         if args.output is None:
@@ -191,16 +204,16 @@ def main():
             "cuda": f"{model.name}_gen.cu",
         }
         for t, code in generated.items():
-            out_path = f"{out_dir.rstrip('/\\')}/{outputs[t]}"
+            out_path = Path(out_dir) / outputs[t]
             with open(out_path, "w", encoding="utf-8") as f:
                 f.write(code)
-            print(out_path)
+            print(f"Generated: {out_path}")
     else:
         out_path = args.output or _default_output(model.name, target)
         code = FEACompiler.compile(model, target)
         with open(out_path, "w", encoding="utf-8") as f:
             f.write(code)
-        print(out_path)
+        print(f"Generated: {out_path}")
 
 
 if __name__ == "__main__":

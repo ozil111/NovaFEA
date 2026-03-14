@@ -1,5 +1,5 @@
 import sympy as sp
-from definitions.abc import Element, Material
+from definitions.abc import Element
 from sympy_codegen import MathModel
 
 class Tet4(Element):
@@ -7,31 +7,26 @@ class Tet4(Element):
     def __init__(self):
         super().__init__("tet4")
 
-    def get_symbolic_model(self, material: Material):
+    def get_stiffness_model(self):
         """
-        Creates the symbolic model for a Tet4 element with a given material.
-        The generated kernel will take nodal coordinates and material parameters as flat input.
+        Creates the symbolic model for a Tet4 stiffness kernel.
+        This kernel takes nodal coordinates and D-matrix components as flat input.
         """
-        # 1. Get material's symbolic model
-        mat_params, D_sym = material.get_symbolic_model()
-
-        # 2. Define kinematic inputs (nodal coordinates)
+        # 1. Define inputs: 12 for coordinates, 36 for D-matrix
         coord_syms = [sp.Symbol(f"c{i}", real=True) for i in range(12)]
-        coords = sp.Matrix(4, 3, lambda i, j: coord_syms[i * 3 + j])
-
-        # 3. Combine all inputs for the kernel
-        # The final C++/JAX function will take one flat array: [coords..., mat_params...]
-        all_inputs = coord_syms + mat_params
-        input_names = [f"coord[{i//3}][{i%3}]" for i in range(12)] + [str(p) for p in mat_params]
+        D_syms = [sp.Symbol(f"D{i}", real=True) for i in range(36)]
         
-        # Rename symbols to "in[i]" to match the C-style array access in the generated code
+        all_inputs = coord_syms + D_syms
+        input_names = [f"coord[{i//3}][{i%3}]" for i in range(12)] + [f"D[{i//6}][{i%6}]" for i in range(36)]
+
+        # Rename symbols to "in[i]" for C-style array access
         in_syms = [sp.Symbol(f"in[{i}]", real=True) for i in range(len(all_inputs))]
         subs_map = dict(zip(all_inputs, in_syms))
 
-        D = D_sym.subs(subs_map)
-        coords = coords.subs(subs_map)
+        coords = sp.Matrix(4, 3, lambda i, j: coord_syms[i * 3 + j]).subs(subs_map)
+        D = sp.Matrix(6, 6, lambda i, j: D_syms[i * 6 + j]).subs(subs_map)
 
-        # 4. Finite Element Formulation (same as before)
+        # 2. Finite Element Formulation
         xi, eta, zeta = sp.symbols("xi eta zeta", real=True)
         N_list = [1 - xi - eta - zeta, xi, eta, zeta]
         dN_dxi = sp.Matrix(4, 3, lambda i, j: sp.diff(N_list[i], (xi, eta, zeta)[j]))
@@ -58,6 +53,7 @@ class Tet4(Element):
         K = B.T * D * B * vol
         K_flat = [K[i, j] for i in range(12) for j in range(12)]
 
-        # 5. Create and return the MathModel
-        model_name = f"{self.name}_{material.name}_Ke"
+        # 3. Create and return the MathModel
+        model_name = f"{self.name}_Ke"
         return MathModel(inputs=in_syms, outputs=K_flat, name=model_name, input_names=input_names)
+

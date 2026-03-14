@@ -9,14 +9,12 @@ class Material(ABC):
         self.name = name
 
     @abstractmethod
-    def get_symbolic_model(self):
+    def get_constitutive_model(self):
         """
-        Returns the symbolic representation of the material.
+        Returns the symbolic representation of the material's constitutive model (D-matrix).
 
         Returns:
-            A tuple containing:
-            - params (list): List of SymPy symbols for material parameters (e.g., [E, nu]).
-            - D_matrix (sympy.Matrix): The 6x6 symbolic constitutive matrix.
+            MathModel: A data container for generating the D-matrix from material parameters.
         """
         pass
 
@@ -27,14 +25,12 @@ class Element(ABC):
         self.name = name
 
     @abstractmethod
-    def get_symbolic_model(self, material: Material):
+    def get_stiffness_model(self):
         """
-        Returns the full mathematical model for the element combined with a material.
-
-        Args:
-            material (Material): A material object providing the constitutive model.
+        Returns the mathematical model for the element's stiffness kernel.
+        This model takes nodal coordinates and D-matrix components as symbolic inputs.
 
         Returns:
-            MathModel: A data container with symbolic inputs and outputs for the code generator.
+            MathModel: A data container for generating the Ke matrix.
         """
         pass
