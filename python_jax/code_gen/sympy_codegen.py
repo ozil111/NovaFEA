@@ -34,6 +34,15 @@ class FEACompiler:
             raise ValueError(f"Unknown target: {target}")
 
     @staticmethod
+    def compile_all(model: MathModel):
+        """一次性生成 jax/cpp/cuda 三种目标源码。"""
+        return {
+            "jax": FEACompiler._to_jax(model),
+            "cpp": FEACompiler._to_source(model, is_cuda=False),
+            "cuda": FEACompiler._to_source(model, is_cuda=True),
+        }
+
+    @staticmethod
     def _to_jax(model):
         """生成 JAX 源码（.py），与 C++ 一致：由 MathModel.outputs 经 CSE 展开生成。"""
         sub_exprs, simplified_outputs = sp.cse(model.outputs)
@@ -155,8 +164,8 @@ def main():
     parser.add_argument(
         "--target", "-t",
         required=True,
-        choices=["jax", "cpp", "cuda"],
-        help="目标：jax / cpp / cuda",
+        choices=["jax", "cpp", "cuda", "all"],
+        help="目标：jax / cpp / cuda / all",
     )
     parser.add_argument(
         "--output", "-o",
@@ -167,12 +176,29 @@ def main():
 
     model = _get_model(args.model)
     target = args.target
-    out_path = args.output or _default_output(args.model, target)
-
-    code = FEACompiler.compile(model, target)
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write(code)
-    print(out_path)
+    if target == "all":
+        if args.output is None:
+            out_base = "."
+        else:
+            out_base = args.output
+        out_dir = out_base
+        generated = FEACompiler.compile_all(model)
+        outputs = {
+            "jax": f"{args.model}_gen.py",
+            "cpp": f"{args.model}_gen.cpp",
+            "cuda": f"{args.model}_gen.cu",
+        }
+        for t, code in generated.items():
+            out_path = f"{out_dir.rstrip('/\\')}/{outputs[t]}"
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write(code)
+            print(out_path)
+    else:
+        out_path = args.output or _default_output(args.model, target)
+        code = FEACompiler.compile(model, target)
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(code)
+        print(out_path)
 
 
 if __name__ == "__main__":
