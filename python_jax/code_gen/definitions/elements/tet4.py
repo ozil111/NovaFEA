@@ -22,6 +22,7 @@ class Tet4(Element):
         # 3. Combine all inputs for the kernel
         # The final C++/JAX function will take one flat array: [coords..., mat_params...]
         all_inputs = coord_syms + mat_params
+        input_names = [f"coord[{i//3}][{i%3}]" for i in range(12)] + [str(p) for p in mat_params]
         
         # Rename symbols to "in[i]" to match the C-style array access in the generated code
         in_syms = [sp.Symbol(f"in[{i}]", real=True) for i in range(len(all_inputs))]
@@ -59,4 +60,4 @@ class Tet4(Element):
 
         # 5. Create and return the MathModel
         model_name = f"{self.name}_{material.name}_Ke"
-        return MathModel(inputs=in_syms, outputs=K_flat, name=model_name)
+        return MathModel(inputs=in_syms, outputs=K_flat, name=model_name, input_names=input_names)

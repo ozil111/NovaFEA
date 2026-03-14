@@ -17,10 +17,11 @@ from definitions.abc import Element, Material
 # --------------------------------------------------------------------------- 
 class MathModel:
     """数据容器：存储数学定义"""
-    def __init__(self, inputs, outputs, name="kernel"):
+    def __init__(self, inputs, outputs, name="kernel", input_names=None):
         self.inputs = inputs   # SymPy 符号列表
         self.outputs = outputs # SymPy 表达式列表
         self.name = name
+        self.input_names = input_names or [str(s) for s in inputs]
 
 
 class FEACompiler:
@@ -76,18 +77,35 @@ class FEACompiler:
     def _to_source(model, is_cuda=False):
         sub_exprs, simplified_outputs = sp.cse(model.outputs)
 
-        lines = []
-        for var, expr in sub_exprs:
-            lines.append(f"    double {var} = {ccode(expr)};")
+        # --- Generate Comments ---
+        comment_lines = ["/**"]
+        comment_lines.append(f" * @brief Computes the {model.name} kernel.")
+        comment_lines.append(" * ")
+        comment_lines.append(" * @param in Input array (const double*). Layout:")
+        
+        for i, name in enumerate(model.input_names):
+            comment_lines.append(f" *   - in[{i}]: {name}")
 
-        lines.append("\n    // --- Output Assignment ---")
+        comment_lines.append(" * ")
+        comment_lines.append(" * @param out Output array (double*). Layout:")
+        comment_lines.append(f" *   - out[0..{len(model.outputs)-1}]: Flattened {model.name} matrix, row-major order.")
+        comment_lines.append(" */")
+        comment_block = "\n".join(comment_lines)
+
+        # --- Generate Function Body ---
+        body_lines = []
+        for var, expr in sub_exprs:
+            body_lines.append(f"    double {var} = {ccode(expr)};")
+
+        body_lines.append("\n    // --- Output Assignment ---")
 
         for i, out_expr in enumerate(simplified_outputs):
-            lines.append(f"    out[{i}] = {ccode(out_expr)};")
+            body_lines.append(f"    out[{i}] = {ccode(out_expr)};")
 
         func_type = "__device__ void" if is_cuda else "inline void"
-        body = "\n".join(lines)
-        return f"{func_type} compute_{model.name}(const double* in, double* out) {{ {body} }}"
+        body = "\n".join(body_lines)
+        
+        return f"{comment_block}\n{func_type} compute_{model.name}(const double* in, double* out) {{\n{body}\n}}"
 
 
 # --------------------------------------------------------------------------- 
