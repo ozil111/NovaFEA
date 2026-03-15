@@ -96,4 +96,4 @@ python test.py
 
 ## 许可
 
-本项目采�?[Mozilla Public License 2.0 (MPL-2.0)](LICENSE) 许可�?
+本项目采用[Mozilla Public License 2.0 (MPL-2.0)](LICENSE) 许可证
