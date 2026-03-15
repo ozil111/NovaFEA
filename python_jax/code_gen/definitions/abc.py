@@ -34,3 +34,10 @@ class Element(ABC):
             MathModel: A data container for generating the Ke matrix.
         """
         pass
+
+    def get_stiffness_operators(self):
+        """
+        Optional: Returns a list of MathModels representing decoupled operators.
+        If implemented, the compiler can generate more optimized code.
+        """
+        return None
