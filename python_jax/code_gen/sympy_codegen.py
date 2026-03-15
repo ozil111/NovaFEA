@@ -215,8 +215,8 @@ def main():
     parser.add_argument(
         "--task",
         required=True,
-        choices=["constitutive", "stiffness"],
-        help="生成任务: 'constitutive' (材料D矩阵) 或 'stiffness' (单元Ke矩阵)",
+        choices=["constitutive", "stiffness", "custom"],
+        help="生成任务: 'constitutive' (材料D矩阵), 'stiffness' (单元Ke矩阵), 或 'custom' (自定义数学模型)",
     )
     parser.add_argument(
         "--element", "-e",
@@ -225,6 +225,10 @@ def main():
     parser.add_argument(
         "--material", "-m",
         help="材料名称 (e.g., 'isotropic'), required for --task=constitutive",
+    )
+    parser.add_argument(
+        "--script", "-s",
+        help="Python 脚本路径 (用于 --task=custom). 脚本中需要提供 get_model() 函数返回 MathModel.",
     )
     parser.add_argument(
         "--target", "-t",
@@ -244,37 +248,54 @@ def main():
             parser.error("--material is required for --task=constitutive")
         material = load_material(args.material)
         model = material.get_constitutive_model()
+        models_to_compile = {model.name: model}
         
-        target = args.target
-        if target == "all":
-            generated = FEACompiler.compile_all(model)
-            for t, code in generated.items():
-                out_path = Path(args.output or ".") / _default_output(model.name, t)
-                with open(out_path, "w", encoding="utf-8") as f:
-                    f.write(code)
-                print(f"Generated: {out_path}")
-        else:
-            out_path = args.output or _default_output(model.name, target)
-            code = FEACompiler.compile(model, target)
-            with open(out_path, "w", encoding="utf-8") as f:
-                f.write(code)
-            print(f"Generated: {out_path}")
-
     elif args.task == "stiffness":
         if not args.element:
             parser.error("--element is required for --task=stiffness")
         element = load_element(args.element)
+        operators = element.get_stiffness_operators()
+        if operators:
+            models_to_compile = {op.name: op for op in operators}
+        else:
+            m = element.get_stiffness_model()
+            models_to_compile = {m.name: m}
+            
+    elif args.task == "custom":
+        if not args.script:
+            parser.error("--script is required for --task=custom")
+        script_path = Path(args.script)
+        if not script_path.exists():
+            parser.error(f"Script file not found: {script_path}")
+            
+        # Dynamically load the script
+        spec = importlib.util.spec_from_file_location("custom_script", str(script_path))
+        custom_mod = importlib.util.module_from_spec(spec)
+        sys.modules["custom_script"] = custom_mod
+        spec.loader.exec_module(custom_mod)
         
-        target = args.target
-        targets = ["jax", "cpp", "cuda"] if target == "all" else [target]
-        
+        if not hasattr(custom_mod, "get_model"):
+            parser.error(f"Script {script_path} must define a 'get_model()' function.")
+            
+        models = custom_mod.get_model()
+        if type(models).__name__ == "MathModel":
+            models_to_compile = {models.name: models}
+        elif isinstance(models, list) and all(type(m).__name__ == "MathModel" for m in models):
+            models_to_compile = {m.name: m for m in models}
+        else:
+            parser.error(f"get_model() must return a MathModel or a list of MathModels. Got: {type(models)}")
+
+    # ---------------- Compile Models ----------------
+    target = args.target
+    targets = ["jax", "cpp", "cuda"] if target == "all" else [target]
+    
+    for name, model in models_to_compile.items():
         for t in targets:
-            kernels = FEACompiler.compile_element(element, t)
-            for name, code in kernels.items():
-                out_path = Path(args.output or ".") / _default_output(name, t)
-                with open(out_path, "w", encoding="utf-8") as f:
-                    f.write(code)
-                print(f"Generated: {out_path}")
+            code = FEACompiler.compile(model, t)
+            out_path = Path(args.output or ".") / _default_output(name, t)
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write(code)
+            print(f"Generated: {out_path}")
 
 
 if __name__ == "__main__":
