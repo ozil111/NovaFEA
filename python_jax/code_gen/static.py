@@ -214,15 +214,16 @@ def main():
     U = apply_dirichlet_bc_and_solve(model, K, F, nid_to_idx, nsid_to_nids)
 
     # 4. Print results
-    print("\nDisplacement U (all dofs):")
-    # print(U)
+    print("\nDisplacement U (all nodes):")
+    # Sort by Node ID for better readability
+    sorted_nids = sorted(nid_to_idx.keys())
+    print(f"{'NodeID':>8} | {'T1':>12} | {'T2':>12} | {'T3':>12}")
+    print("-" * 50)
     
-    if nid_to_idx:
-        max_nid = max(nid_to_idx.keys())
-        max_n_idx = nid_to_idx[max_nid]
-        if U.shape[0] > max_n_idx * 3 + 2:
-            u_node = U[max_n_idx*3 : max_n_idx*3+3]
-            print(f"\nNode {max_nid} displacement (T1, T2, T3): {u_node[0]:.6e}, {u_node[1]:.6e}, {u_node[2]:.6e}")
+    for nid in sorted_nids:
+        idx = nid_to_idx[nid]
+        u_node = U[idx*3 : idx*3+3]
+        print(f"{nid:8d} | {u_node[0]:12.6e} | {u_node[1]:12.6e} | {u_node[2]:12.6e}")
 
 if __name__ == "__main__":
     main()
