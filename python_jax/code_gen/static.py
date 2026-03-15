@@ -2,6 +2,7 @@ import argparse
 import importlib
 import json
 import re
+import sys
 from pathlib import Path
 
 # Enable 64-bit precision in JAX
@@ -9,6 +10,9 @@ import jax
 jax.config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp
+
+# Add current dir to path for dynamic imports
+sys.path.append(str(Path(__file__).parent.resolve()))
 
 # ---------------------------------------------------------------------------
 # JAX Solver for Hybrid Decoupled Kernels
@@ -49,45 +53,84 @@ def build_solver_data(model):
 
     elements_data = []
     for e in model["mesh"]["elements"]:
-        if int(e["etype"]) != 304:
-            raise ValueError(f"This solver currently only supports Tet4 (etype=304), but got {e['etype']}")
-        elements_data.append({"pid": int(e["pid"]), "nids": [int(nid) for nid in e["nids"]]})
+        etype = int(e["etype"])
+        if etype not in [304, 308]:
+            raise ValueError(f"This solver currently only supports Tet4 (304) or Hex8 (308), but got {etype}")
+        elements_data.append({
+            "pid": int(e["pid"]), 
+            "nids": [int(nid) for nid in e["nids"]],
+            "etype": etype
+        })
 
     nsid_to_nids = {int(ns["nsid"]): [int(nid) for nid in ns["nids"]] for ns in model.get("nodeset", [])}
     return nodes_arr, elements_data, nid_to_idx, nsid_to_nids
 
-def assemble_global_K_and_F(model, nodes_arr, elements_data, nid_to_idx, nsid_to_nids, d_kernel, ke_kernel):
+def assemble_global_K_and_F(model, nodes_arr, elements_data, nid_to_idx, nsid_to_nids, kernels):
     """
     Assembles the global stiffness matrix K and load vector F.
-    This function implements the hybrid decoupled workflow in JAX.
+    Supports both Tet4 (single kernel) and Hex8 (operator-based).
     """
     ndof = nodes_arr.shape[0] * 3
     K = jnp.zeros((ndof, ndof), dtype=jnp.float64)
     F = jnp.zeros((ndof,), dtype=jnp.float64)
 
+    # Pre-extract kernels
+    d_kernel = kernels.get("material_D")
+    tet4_ke_kernel = kernels.get("tet4_Ke")
+    
+    # Hex8 operators
+    hex8_op_dN = kernels.get("hex8_op_dN_dnat")
+    hex8_op_map = kernels.get("hex8_op_mapping")
+    hex8_op_asm = kernels.get("hex8_op_assembly")
+
     for e in elements_data:
-        # 1. Get data for the current element
         nids = e["nids"]
         coords = jnp.stack([nodes_arr[nid_to_idx[nid]] for nid in nids])
         mat_params = _material_params_from_model(model, e["pid"])
-
-        # 2. Call the material kernel to get the D-matrix
         d_matrix_flat = jnp.asarray(d_kernel(mat_params))
 
-        # 3. Prepare inputs and call the stiffness kernel to get Ke
-        stiffness_kernel_input = jnp.concatenate([coords.flatten(), d_matrix_flat])
-        ke_flat = jnp.asarray(ke_kernel(stiffness_kernel_input))
-        Ke = ke_flat.reshape(12, 12)
+        etype = e["etype"]
+        Ke = None
 
-        # 4. Assemble Ke into the global K matrix
-        edofs = jnp.array([[nid_to_idx[nid] * 3 + i for i in range(3)] for nid in nids]).flatten()
-        K = K.at[jnp.ix_(edofs, edofs)].add(Ke)
+        if etype == 304: # Tet4
+            stiffness_kernel_input = jnp.concatenate([coords.flatten(), d_matrix_flat])
+            ke_flat = jnp.asarray(tet4_ke_kernel(stiffness_kernel_input))
+            Ke = ke_flat.reshape(12, 12)
+            edofs = jnp.array([[nid_to_idx[nid] * 3 + i for i in range(3)] for nid in nids]).flatten()
+        
+        elif etype == 308: # Hex8
+            # 2x2x2 Gauss integration
+            gp_val = 1.0 / jnp.sqrt(3.0)
+            gps = [-gp_val, gp_val]
+            gauss_points = [(x, y, z) for x in gps for y in gps for z in gps]
+            
+            Ke = jnp.zeros((24, 24), dtype=jnp.float64)
+            coords_flat = coords.flatten()
+
+            for pt in gauss_points:
+                # 1. dN/dnat
+                dN_dnat = jnp.asarray(hex8_op_dN(jnp.array(pt)))
+                
+                # 2. Mapping
+                map_input = jnp.concatenate([coords_flat, dN_dnat])
+                map_output = jnp.asarray(hex8_op_map(map_input))
+                dN_dx = map_output[0:24]
+                detJ = map_output[24]
+                
+                # 3. Assembly
+                asm_input = jnp.concatenate([dN_dx, d_matrix_flat, jnp.array([detJ, 1.0])])
+                ke_gp_flat = jnp.asarray(hex8_op_asm(asm_input))
+                Ke = Ke + ke_gp_flat.reshape(24, 24)
+            
+            edofs = jnp.array([[nid_to_idx[nid] * 3 + i for i in range(3)] for nid in nids]).flatten()
+
+        if Ke is not None:
+            K = K.at[jnp.ix_(edofs, edofs)].add(Ke)
 
     # Assemble global load vector F
     for ld in model.get("load", []):
         nsid = int(ld["nsid"])
         value = float(ld["value"])
-        # Simple parsing for dof "x", "y", "z", "all"
         s = str(ld["dof"]).lower()
         comps = []
         if "x" in s or "1" in s or "all" in s: comps.append(0)
@@ -95,9 +138,10 @@ def assemble_global_K_and_F(model, nodes_arr, elements_data, nid_to_idx, nsid_to
         if "z" in s or "3" in s or "all" in s: comps.append(2)
         
         for nid in nsid_to_nids[nsid]:
-            base_dof = nid_to_idx[nid] * 3
-            for comp in comps:
-                F = F.at[base_dof + comp].add(value)
+            if nid in nid_to_idx:
+                base_dof = nid_to_idx[nid] * 3
+                for comp in comps:
+                    F = F.at[base_dof + comp].add(value)
 
     return K, F
 
@@ -116,12 +160,12 @@ def apply_dirichlet_bc_and_solve(model, K, F, nid_to_idx, nsid_to_nids):
         if "z" in s or "3" in s or "all" in s: comps.append(2)
 
         for nid in nsid_to_nids[nsid]:
-            base_dof = nid_to_idx[nid] * 3
-            for comp in comps:
-                fixed_dofs.add(base_dof + comp)
+            if nid in nid_to_idx:
+                base_dof = nid_to_idx[nid] * 3
+                for comp in comps:
+                    fixed_dofs.add(base_dof + comp)
 
     ndof = K.shape[0]
-    # Correctly calculate free DOFs using standard Python sets
     all_dofs_set = set(range(ndof))
     free_dofs_set = all_dofs_set - fixed_dofs
     free_dofs = jnp.array(sorted(list(free_dofs_set)), dtype=jnp.int32)
@@ -136,25 +180,28 @@ def apply_dirichlet_bc_and_solve(model, K, F, nid_to_idx, nsid_to_nids):
     return U
 
 def main():
-    parser = argparse.ArgumentParser(description="JAX solver using decoupled kernels from sympy_codegen.py")
-    parser.add_argument(
-        "--model",
-        required=True,
-        help="Path to the model file (e.g., tet4_mat1_im.jsonc)",
-    )
-    parser.add_argument("--element", default="tet4", help="Element type (e.g., tet4)")
-    parser.add_argument("--material", default="isotropic", help="Material type (e.g., isotropic)")
+    parser = argparse.ArgumentParser(description="JAX solver using decoupled kernels")
+    parser.add_argument("--model", required=True, help="Path to the model file")
+    parser.add_argument("--element", default="tet4", help="Element type")
+    parser.add_argument("--material", default="isotropic", help="Material type")
     
     args = parser.parse_args()
 
     # 1. Load generated kernels
-    d_kernel_module_name = f"{args.material}_D_gen"
-    d_kernel_func_prefix = f"{args.material}_D"
-    d_kernel = _load_kernel_func(d_kernel_module_name, d_kernel_func_prefix)
+    kernels = {}
+    
+    # Material kernel
+    d_mod = f"{args.material}_D_gen"
+    kernels["material_D"] = _load_kernel_func(d_mod, f"{args.material}_D")
 
-    ke_kernel_module_name = f"{args.element}_Ke_gen"
-    ke_kernel_func_prefix = f"{args.element}_Ke"
-    ke_kernel = _load_kernel_func(ke_kernel_module_name, ke_kernel_func_prefix)
+    # Element kernels/operators
+    if args.element == "tet4":
+        ke_mod = "tet4_Ke_gen"
+        kernels["tet4_Ke"] = _load_kernel_func(ke_mod, "tet4_Ke")
+    elif args.element == "hex8":
+        kernels["hex8_op_dN_dnat"] = _load_kernel_func("hex8_op_dN_dnat_gen", "hex8_op_dN_dnat")
+        kernels["hex8_op_mapping"] = _load_kernel_func("hex8_op_mapping_gen", "hex8_op_mapping")
+        kernels["hex8_op_assembly"] = _load_kernel_func("hex8_op_assembly_gen", "hex8_op_assembly")
 
     print("Successfully loaded generated kernels.")
 
@@ -163,20 +210,20 @@ def main():
     nodes_arr, elements_data, nid_to_idx, nsid_to_nids = build_solver_data(model)
 
     # 3. Assemble and solve
-    K, F = assemble_global_K_and_F(model, nodes_arr, elements_data, nid_to_idx, nsid_to_nids, d_kernel, ke_kernel)
+    K, F = assemble_global_K_and_F(model, nodes_arr, elements_data, nid_to_idx, nsid_to_nids, kernels)
     U = apply_dirichlet_bc_and_solve(model, K, F, nid_to_idx, nsid_to_nids)
 
     # 4. Print results
-    print("\nDisplacement U (all dofs):")
-    print(U)
+    print("\nDisplacement U (all nodes):")
+    # Sort by Node ID for better readability
+    sorted_nids = sorted(nid_to_idx.keys())
+    print(f"{'NodeID':>8} | {'T1':>12} | {'T2':>12} | {'T3':>12}")
+    print("-" * 50)
     
-    # Find a node to print for easy comparison, e.g., the highest node id
-    if nid_to_idx:
-        max_nid = max(nid_to_idx.keys())
-        max_n_idx = nid_to_idx[max_nid]
-        if U.shape[0] > max_n_idx * 3 + 2:
-            u_node = U[max_n_idx*3 : max_n_idx*3+3]
-            print(f"\nNode {max_nid} displacement (T1, T2, T3): {u_node[0]:.6f}, {u_node[1]:.6f}, {u_node[2]:.6f}")
+    for nid in sorted_nids:
+        idx = nid_to_idx[nid]
+        u_node = U[idx*3 : idx*3+3]
+        print(f"{nid:8d} | {u_node[0]:12.6e} | {u_node[1]:12.6e} | {u_node[2]:12.6e}")
 
 if __name__ == "__main__":
     main()

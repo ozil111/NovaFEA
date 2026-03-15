@@ -2,125 +2,93 @@
 
 ## 1. Introduction
 
-This tool generates optimized C++, CUDA, and JAX computational kernels for Finite Element Analysis (FEA). It takes high-level mathematical definitions of elements and materials and converts them into low-level, ready-to-use functions.
+This tool generates optimized C++, CUDA, and JAX computational kernels for Finite Element Analysis (FEA). It converts high-level mathematical definitions into highly efficient, low-level functions.
 
-The generator operates under a "Hybrid Decoupling" architecture, creating two distinct types of functions:
--   **Constitutive Kernels**: Calculate a material's D-matrix.
--   **Stiffness Kernels**: Calculate an element's stiffness matrix (`Ke`) using a given D-matrix.
+The generator supports three main types of tasks:
+-   **Constitutive Kernels**: Generate material D-matrices.
+-   **Stiffness Kernels**: Generate element stiffness matrices (`Ke`), either as a single kernel or a set of **Decoupled Operators**.
+-   **Custom Kernels**: Generate arbitrary mathematical models from a standalone Python script.
 
-## 2. Prerequisites
+## 2. Command-Line Usage
 
--   Python 3.9+
--   SymPy: `pip install sympy`
--   JAX (optional, for JAX target): `pip install jax jaxlib`
+The primary script is `sympy_codegen.py`.
 
-## 3. Usage
+### Arguments
 
-The primary script is `sympy_codegen.py`. It is a command-line tool that dispatches generation tasks.
+-   `--task {constitutive,stiffness,custom}`: **(Required)**
+    -   `constitutive`: Material D-matrix. Requires `--material`.
+    -   `stiffness`: Element Ke matrix (or operators). Requires `--element`.
+    -   `custom`: Arbitrary model. Requires `--script`.
+-   `--material <name>`: Material name (e.g., `isotropic`).
+-   `--element <name>`: Element name (e.g., `hex8`).
+-   `--script <path>`: Path to a Python script for custom tasks.
+-   `--target {cpp,cuda,jax,all}`: **(Required)** Target language.
+-   `--output <path>`: (Optional) Output file or directory.
 
-### Command-Line Arguments
+## 3. Advanced Features
 
--   `--task {constitutive,stiffness}`: **(Required)** The type of kernel to generate.
-    -   `constitutive`: Generate a material D-matrix kernel. Requires `--material`.
-    -   `stiffness`: Generate an element stiffness matrix (`Ke`) kernel. Requires `--element`.
--   `--material <name>`: The name of the material to use (e.g., `isotropic`). Required for `--task=constitutive`.
--   `--element <name>`: The name of the element to use (e.g., `tet4`). Required for `--task=stiffness`.
--   `--target {cpp,cuda,jax,all}`: **(Required)** The target programming language.
--   `--output <path>`: (Optional) The path for the output file. If not provided, a default name is generated (e.g., `isotropic_D_gen.cpp`).
+### 3.1 Operator-Based Decoupling (New!)
+For complex elements like `Hex8`, a single monolithic kernel can be slow to compile and hard to vectorize. The generator now supports splitting the calculation into modular **operators**:
+1.  **dN_dnat**: Shape function derivatives in natural coordinates.
+2.  **Mapping**: Jacobian calculation and physical coordinate derivatives (`dN_dx`).
+3.  **Assembly**: Integration point contribution ($B^T D B \det(J) W$).
 
-## 4. Code Generation Examples
+This approach enables:
+-   **SoA (Structure of Arrays) Layout**: Output data is arranged for optimal SIMD vectorization.
+-   **Vectorization Hints**: C++ kernels include `__restrict__` and `[[gnu::always_inline]]`.
 
-### Task 1: Generate a Material Kernel
+### 3.2 Custom Task Interface
+You can generate code for any formula by providing a script with a `get_model()` function:
 
-This task creates a function that computes the 6x6 constitutive matrix (D-matrix).
+**Example `my_formula.py`:**
+```python
+import sympy as sp
+from sympy_codegen import MathModel
 
+def get_model():
+    x, y = sp.symbols("x y")
+    return MathModel(inputs=[x, y], outputs=[x*y, x+y], name="my_add_mul")
+```
 **Command:**
 ```bash
-python sympy_codegen.py --task constitutive --material isotropic --target cpp
+python sympy_codegen.py --task custom --script my_formula.py --target cpp
 ```
 
-**Output:**
-This command generates a file named `isotropic_D_gen.cpp` containing the following function:
+## 4. Performance Optimizations
+
+-   **Chunked CSE**: Common Subexpression Elimination is performed in row-level chunks. This reduces generation time for large matrices (like 24x24) from hours to seconds.
+-   **Memory Alignment**: C++ outputs are structured to be "compiler-friendly" for auto-vectorization.
+-   **JAX Unpacking**: JAX kernels automatically unpack `in_flat` into named variables for readability and performance.
+
+## 5. Integration Example (Operator Mode)
+
+Using decoupled operators in a C++ solver:
 
 ```cpp
-/**
- * @brief Computes the isotropic_D kernel.
- * 
- * @param in Input array (const double*). Layout:
- *   - in[0]: E
- *   - in[1]: nu
- * 
- * @param out Output array (double*). Layout:
- *   - out[0..35]: Flattened result, row-major order.
- */
-inline void compute_isotropic_D(const double* in, double* out) {
-    // ... optimized code to compute 36 components of D ...
-}
-```
+#include "hex8_op_dN_dnat_gen.cpp"
+#include "hex8_op_mapping_gen.cpp"
+#include "hex8_op_assembly_gen.cpp"
 
-### Task 2: Generate an Element Stiffness Kernel
-
-This task creates a function that computes the element stiffness matrix (`Ke`).
-
-**Command:**
-```bash
-python sympy_codegen.py --task stiffness --element tet4 --target cpp
-```
-
-**Output:**
-This command generates a file named `tet4_Ke_gen.cpp` containing the following function:
-
-```cpp
-/**
- * @brief Computes the tet4_Ke kernel.
- * 
- * @param in Input array (const double*). Layout:
- *   - in[0]: coord[0][0]
- *   ...
- *   - in[11]: coord[3][2]
- *   - in[12]: D[0][0]
- *   ...
- *   - in[47]: D[5][5]
- * 
- * @param out Output array (double*). Layout:
- *   - out[0..143]: Flattened result, row-major order.
- */
-inline void compute_tet4_Ke(const double* in, double* out) {
-    // ... optimized code for B^T * D * B integration ...
-}
-```
-
-## 5. Integration Example (Conceptual C++)
-
-To use the generated kernels in your main C++ application (e.g., `NovaFEA`), you would include or link the generated files and call the functions in sequence.
-
-```cpp
-// main_fea_solver.cpp
-
-#include "isotropic_D_gen.cpp" // Or link the compiled object
-#include "tet4_Ke_gen.cpp"     // Or link the compiled object
-
-void calculate_element_stiffness() {
-    // 1. Prepare input data for a single element
-    double node_coords[12] = { ... };      // Nodal coordinates
-    double material_params[2] = { E, nu }; // Material properties
-
-    // 2. Prepare storage for intermediate and final results
-    double D_matrix[36];
-    double Ke_matrix[144];
-
-    // 3. Call the material kernel to compute the D-matrix
-    compute_isotropic_D(material_params, D_matrix);
-
-    // 4. Prepare the input array for the stiffness kernel
-    double stiffness_kernel_input[48];
-    for (int i = 0; i < 12; ++i) stiffness_kernel_input[i] = node_coords[i];
-    for (int i = 0; i < 36; ++i) stiffness_kernel_input[i+12] = D_matrix[i];
-
-    // 5. Call the stiffness kernel to compute Ke
-    compute_tet4_Ke(stiffness_kernel_input, Ke_matrix);
-
-    // 6. Now Ke_matrix can be used for global assembly
-    // ...
+void compute_hex8_stiffness() {
+    double Ke[576] = {0}; // 24x24
+    
+    // Gauss Loop (2x2x2)
+    for (int gp = 0; gp < 8; ++gp) {
+        double dN_dnat[24], dN_dx[24], detJ;
+        
+        // 1. Natural derivatives
+        compute_hex8_op_dN_dnat(gp_coords[gp], dN_dnat);
+        
+        // 2. Map to physical space (SoA output)
+        double map_in[48]; // coords + dN_dnat
+        double map_out[25]; // dN_dx + detJ
+        compute_hex8_op_mapping(map_in, map_out);
+        
+        // 3. Assemble point contribution
+        double asm_out[576];
+        compute_hex8_op_assembly(asm_in, asm_out);
+        
+        // Sum contributions...
+    }
 }
 ```
