@@ -215,8 +215,8 @@ def main():
     parser.add_argument(
         "--task",
         required=True,
-        choices=["constitutive", "stiffness", "custom"],
-        help="生成任务: 'constitutive' (材料D矩阵), 'stiffness' (单元Ke矩阵), 或 'custom' (自定义数学模型)",
+        choices=["constitutive", "stiffness", "mass", "custom"],
+        help="生成任务: 'constitutive' (材料D矩阵), 'stiffness' (单元Ke矩阵), 'mass' (质量矩阵), 或 'custom' (自定义数学模型)",
     )
     parser.add_argument(
         "--element", "-e",
@@ -260,6 +260,17 @@ def main():
         else:
             m = element.get_stiffness_model()
             models_to_compile = {m.name: m}
+
+    elif args.task == "mass":
+        if not args.element:
+            parser.error("--element is required for --task=mass")
+        element = load_element(args.element)
+        operators = element.get_mass_operators()
+        if operators:
+            models_to_compile = {op.name: op for op in operators}
+        else:
+            # Fallback if no specific mass model is defined, though mass usually has operators
+            parser.error(f"No mass operators defined for element: {args.element}")
             
     elif args.task == "custom":
         if not args.script:
