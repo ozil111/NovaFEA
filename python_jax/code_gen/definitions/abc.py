@@ -37,7 +37,19 @@ class Element(ABC):
 
     def get_stiffness_operators(self):
         """
-        Optional: Returns a list of MathModels representing decoupled operators.
+        Optional: Returns a list of MathModels representing decoupled operators for stiffness.
         If implemented, the compiler can generate more optimized code.
+        """
+        return None
+
+    def get_mass_operators(self):
+        """
+        Optional: Returns a list of MathModels representing decoupled operators for mass.
+        """
+        return None
+
+    def get_internal_force_operators(self):
+        """
+        Optional: Returns a list of MathModels representing decoupled operators for internal force.
         """
         return None

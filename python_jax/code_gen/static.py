@@ -19,7 +19,7 @@ sys.path.append(str(Path(__file__).parent.resolve()))
 # ---------------------------------------------------------------------------
 
 def _strip_jsonc_comments(text):
-    return re.sub(r"^\s*//.*$", "", text, flags=re.MULTILINE)
+    return re.sub(r"//.*$", "", text, flags=re.MULTILINE)
 
 def _load_json_or_jsonc(path):
     p = Path(path)
@@ -68,7 +68,7 @@ def build_solver_data(model):
 def assemble_global_K_and_F(model, nodes_arr, elements_data, nid_to_idx, nsid_to_nids, kernels):
     """
     Assembles the global stiffness matrix K and load vector F.
-    Supports both Tet4 (single kernel) and Hex8 (operator-based).
+    Supports both Tet4 and Hex8 using operator-based kernels.
     """
     ndof = nodes_arr.shape[0] * 3
     K = jnp.zeros((ndof, ndof), dtype=jnp.float64)
@@ -76,53 +76,57 @@ def assemble_global_K_and_F(model, nodes_arr, elements_data, nid_to_idx, nsid_to
 
     # Pre-extract kernels
     d_kernel = kernels.get("material_D")
-    tet4_ke_kernel = kernels.get("tet4_Ke")
-    
-    # Hex8 operators
-    hex8_op_dN = kernels.get("hex8_op_dN_dnat")
-    hex8_op_map = kernels.get("hex8_op_mapping")
-    hex8_op_asm = kernels.get("hex8_op_assembly")
 
     for e in elements_data:
         nids = e["nids"]
-        coords = jnp.stack([nodes_arr[nid_to_idx[nid]] for nid in nids])
+        idx_list = [nid_to_idx[nid] for nid in nids]
+        coords = nodes_arr[jnp.array(idx_list)]
+        coords_flat = coords.flatten()
         mat_params = _material_params_from_model(model, e["pid"])
         d_matrix_flat = jnp.asarray(d_kernel(mat_params))
 
         etype = e["etype"]
         Ke = None
 
-        if etype == 304: # Tet4
-            stiffness_kernel_input = jnp.concatenate([coords.flatten(), d_matrix_flat])
-            ke_flat = jnp.asarray(tet4_ke_kernel(stiffness_kernel_input))
+        if etype == 304: # Tet4 (Operator-based)
+            # 1. dN/dnat (Constant for Tet4)
+            dN_dnat = jnp.asarray(kernels["tet4_op_dN_dnat"](jnp.array([0.25, 0.25, 0.25])))
+            
+            # 2. Mapping
+            map_input = jnp.concatenate([coords_flat, dN_dnat])
+            map_output = jnp.asarray(kernels["tet4_op_mapping"](map_input))
+            dN_dx = map_output[0:12]
+            detJ = map_output[12]
+            
+            # 3. Assembly (Weight = 1/6 for Tet4 volume integration)
+            asm_input = jnp.concatenate([dN_dx, d_matrix_flat, jnp.array([detJ, 1.0/6.0])])
+            ke_flat = jnp.asarray(kernels["tet4_op_assembly"](asm_input))
             Ke = ke_flat.reshape(12, 12)
-            edofs = jnp.array([[nid_to_idx[nid] * 3 + i for i in range(3)] for nid in nids]).flatten()
+            edofs = jnp.array([[idx * 3 + i for i in range(3)] for idx in idx_list]).flatten()
         
-        elif etype == 308: # Hex8
+        elif etype == 308: # Hex8 (Operator-based)
             # 2x2x2 Gauss integration
             gp_val = 1.0 / jnp.sqrt(3.0)
             gps = [-gp_val, gp_val]
             gauss_points = [(x, y, z) for x in gps for y in gps for z in gps]
             
             Ke = jnp.zeros((24, 24), dtype=jnp.float64)
-            coords_flat = coords.flatten()
-
             for pt in gauss_points:
                 # 1. dN/dnat
-                dN_dnat = jnp.asarray(hex8_op_dN(jnp.array(pt)))
+                dN_dnat = jnp.asarray(kernels["hex8_op_dN_dnat"](jnp.array(pt)))
                 
                 # 2. Mapping
                 map_input = jnp.concatenate([coords_flat, dN_dnat])
-                map_output = jnp.asarray(hex8_op_map(map_input))
+                map_output = jnp.asarray(kernels["hex8_op_mapping"](map_input))
                 dN_dx = map_output[0:24]
                 detJ = map_output[24]
                 
                 # 3. Assembly
                 asm_input = jnp.concatenate([dN_dx, d_matrix_flat, jnp.array([detJ, 1.0])])
-                ke_gp_flat = jnp.asarray(hex8_op_asm(asm_input))
+                ke_gp_flat = jnp.asarray(kernels["hex8_op_assembly"](asm_input))
                 Ke = Ke + ke_gp_flat.reshape(24, 24)
             
-            edofs = jnp.array([[nid_to_idx[nid] * 3 + i for i in range(3)] for nid in nids]).flatten()
+            edofs = jnp.array([[idx * 3 + i for i in range(3)] for idx in idx_list]).flatten()
 
         if Ke is not None:
             K = K.at[jnp.ix_(edofs, edofs)].add(Ke)
@@ -180,7 +184,7 @@ def apply_dirichlet_bc_and_solve(model, K, F, nid_to_idx, nsid_to_nids):
     return U
 
 def main():
-    parser = argparse.ArgumentParser(description="JAX solver using decoupled kernels")
+    parser = argparse.ArgumentParser(description="JAX static solver using decoupled operators")
     parser.add_argument("--model", required=True, help="Path to the model file")
     parser.add_argument("--element", default="tet4", help="Element type")
     parser.add_argument("--material", default="isotropic", help="Material type")
@@ -194,16 +198,17 @@ def main():
     d_mod = f"{args.material}_D_gen"
     kernels["material_D"] = _load_kernel_func(d_mod, f"{args.material}_D")
 
-    # Element kernels/operators
+    # Element operators
     if args.element == "tet4":
-        ke_mod = "tet4_Ke_gen"
-        kernels["tet4_Ke"] = _load_kernel_func(ke_mod, "tet4_Ke")
+        kernels["tet4_op_dN_dnat"] = _load_kernel_func("tet4_op_dN_dnat_gen", "tet4_op_dN_dnat")
+        kernels["tet4_op_mapping"] = _load_kernel_func("tet4_op_mapping_gen", "tet4_op_mapping")
+        kernels["tet4_op_assembly"] = _load_kernel_func("tet4_op_assembly_gen", "tet4_op_assembly")
     elif args.element == "hex8":
         kernels["hex8_op_dN_dnat"] = _load_kernel_func("hex8_op_dN_dnat_gen", "hex8_op_dN_dnat")
         kernels["hex8_op_mapping"] = _load_kernel_func("hex8_op_mapping_gen", "hex8_op_mapping")
         kernels["hex8_op_assembly"] = _load_kernel_func("hex8_op_assembly_gen", "hex8_op_assembly")
 
-    print("Successfully loaded generated kernels.")
+    print(f"Successfully loaded {args.element} kernels.")
 
     # 2. Load model and build solver data
     model = _load_json_or_jsonc(args.model)
@@ -215,7 +220,6 @@ def main():
 
     # 4. Print results
     print("\nDisplacement U (all nodes):")
-    # Sort by Node ID for better readability
     sorted_nids = sorted(nid_to_idx.keys())
     print(f"{'NodeID':>8} | {'T1':>12} | {'T2':>12} | {'T3':>12}")
     print("-" * 50)
