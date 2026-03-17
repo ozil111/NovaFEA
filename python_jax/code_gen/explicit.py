@@ -83,30 +83,18 @@ def build_solver_data(model, kernels):
         me_lumped_nodes = None
 
         if etype == 304: # Tet4
-            # 1. Stiffness (using operators)
-            # For Tet4, we use a single point (centriod) but operators expect GP
-            # Actually for Tet4 constant strain, any point is fine. 
-            # dN_dnat is constant.
             dN_dnat = jnp.asarray(kernels["tet4_op_dN_dnat"](jnp.array([0.25, 0.25, 0.25])))
-            
             map_input = jnp.concatenate([coords_flat, dN_dnat])
             map_output = jnp.asarray(kernels["tet4_op_mapping"](map_input))
             dN_dx = map_output[0:12]
             detJ = map_output[12]
-            
-            # Assembly (weight for Tet4 is 1/6 for the whole element if using detJ of Jacobian)
-            # In our sympy_codegen for Tet4 op_asm, we use Abs(detJ) * weight.
-            # Volume of Tet4 = Abs(detJ)/6. So weight should be 1/6.
             asm_input = jnp.concatenate([dN_dx, d_matrix_flat, jnp.array([detJ, 1.0/6.0])])
             ke_flat = jnp.asarray(kernels["tet4_op_assembly"](asm_input))
             Ke = ke_flat.reshape(12, 12)
-            
-            # 2. Mass
             mass_input = jnp.concatenate([coords_flat, jnp.array([rho])])
             me_lumped_nodes = jnp.asarray(kernels["tet4_op_lumped_mass"](mass_input))
 
         elif etype == 308: # Hex8
-            # 1. Stiffness (2x2x2 Gauss)
             gp_val = 1.0 / jnp.sqrt(3.0)
             gps = [-gp_val, gp_val]
             gauss_points = [(x, y, z) for x in gps for y in gps for z in gps]
@@ -118,14 +106,12 @@ def build_solver_data(model, kernels):
                 map_output = jnp.asarray(kernels["hex8_op_mapping"](map_input))
                 dN_dx = map_output[0:24]
                 detJ = map_output[24]
-                
                 asm_input = jnp.concatenate([dN_dx, d_matrix_flat, jnp.array([detJ, 1.0])])
                 ke_gp_flat = jnp.asarray(kernels["hex8_op_assembly"](asm_input))
                 Ke = Ke + ke_gp_flat.reshape(24, 24)
             
-            # 2. Mass (TODO: need hex8_op_lumped_mass)
-            # For now Hex8 mass is not implemented in generators
-            raise NotImplementedError("Hex8 mass operators not yet generated.")
+            mass_input = jnp.concatenate([coords_flat, jnp.array([rho])])
+            me_lumped_nodes = jnp.asarray(kernels["hex8_op_lumped_mass"](mass_input))
 
         if Ke is not None:
             edofs = jnp.array([[idx * 3 + i for i in range(3)] for idx in idx_list]).flatten()
@@ -135,7 +121,6 @@ def build_solver_data(model, kernels):
             for i, idx in enumerate(idx_list):
                 M_lumped = M_lumped.at[idx, :].add(me_lumped_nodes[i])
 
-    # BC Mask and External Load (Same as before)
     bc_mask = jnp.ones((num_nodes, 3), dtype=jnp.float64)
     nsid_to_nids = {int(ns["nsid"]): [int(nid) for nid in ns["nids"]] for ns in model.get("nodeset", [])}
     for bc in model.get("boundary", []):
@@ -177,7 +162,6 @@ def main():
     parser.add_argument("--material", default="isotropic", help="Material type")
     args = parser.parse_args()
 
-    # 1. Load generated kernels
     kernels = {}
     d_mod = f"{args.material}_D_gen"
     kernels["material_D"] = _load_kernel_func(d_mod, f"{args.material}_D")
@@ -191,9 +175,8 @@ def main():
         kernels["hex8_op_dN_dnat"] = _load_kernel_func("hex8_op_dN_dnat_gen", "hex8_op_dN_dnat")
         kernels["hex8_op_mapping"] = _load_kernel_func("hex8_op_mapping_gen", "hex8_op_mapping")
         kernels["hex8_op_assembly"] = _load_kernel_func("hex8_op_assembly_gen", "hex8_op_assembly")
-        # kernels["hex8_op_lumped_mass"] = ...
+        kernels["hex8_op_lumped_mass"] = _load_kernel_func("hex8_op_lumped_mass_gen", "hex8_op_lumped_mass")
 
-    # 2. Load model and build solver data
     model = _load_json_or_jsonc(args.model)
     nodes_arr, K, M_lumped, bc_mask, F_ext_base, nid_to_idx, endtime, dt = build_solver_data(model, kernels)
     num_nodes = nodes_arr.shape[0]
@@ -209,7 +192,14 @@ def main():
 
     def solve():
         num_steps = int(endtime / dt)
-        u, v_half = jnp.zeros((num_nodes, 3)), jnp.zeros((num_nodes, 3))
+        u = jnp.zeros((num_nodes, 3))
+        
+        # Correct Leapfrog initialization: v_{1/2} = v_0 + a_0 * dt/2
+        f_int0 = (K @ u.flatten()).reshape((num_nodes, 3))
+        f_ext0 = jnp.zeros((num_nodes, 3)) # Assuming F_ext(0)=0 for ramp
+        a0 = (f_ext0 - f_int0) / M_lumped * bc_mask
+        v_half = jnp.zeros((num_nodes, 3)) + a0 * (dt / 2.0)
+        
         print(f"Starting explicit simulation: {args.element}, steps={num_steps}")
         for s in range(num_steps):
             u, v_half = step_update(u, v_half, (s + 1) * dt)

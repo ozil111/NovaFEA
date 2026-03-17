@@ -138,3 +138,52 @@ class Hex8(Element):
         )
 
         return [op_dN, op_map, op_asm]
+
+    def get_mass_operators(self):
+        """
+        Returns decoupled operators for Hex8 mass calculation.
+        Uses 2x2x2 Gauss integration and lumped mass.
+        """
+        # Node coordinates and density
+        coord_syms = [sp.Symbol(f"c{i}", real=True) for i in range(24)]
+        rho_sym = sp.Symbol("rho", real=True)
+
+        coords = sp.Matrix(8, 3, lambda i, j: coord_syms[i * 3 + j])
+
+        # Shape functions in natural coordinates
+        xi, eta, zeta = sp.symbols("xi eta zeta", real=True)
+        node_coords = [
+            (-1, -1, -1), (1, -1, -1), (1, 1, -1), (-1, 1, -1),
+            (-1, -1,  1), (1, -1,  1), (1, 1,  1), (-1, 1,  1)
+        ]
+        N = [0.125 * (1 + nc[0] * xi) * (1 + nc[1] * eta) * (1 + nc[2] * zeta) for nc in node_coords]
+
+        # Derivatives of shape functions w.r.t natural coordinates
+        dN_dnat = sp.Matrix(8, 3, lambda i, j: sp.diff(N[i], (xi, eta, zeta)[j]))
+
+        # 2x2x2 Gauss integration for volume
+        gp_val = 1.0 / sp.sqrt(3)
+        gauss_points = [
+            (x, y, z) for x in [-gp_val, gp_val] for y in [-gp_val, gp_val] for z in [-gp_val, gp_val]
+        ]
+
+        vol = 0
+        for pt in gauss_points:
+            dN_dnat_gp = dN_dnat.subs({xi: pt[0], eta: pt[1], zeta: pt[2]})
+            J = coords.T * dN_dnat_gp
+            detJ = sp.Abs(J.det())
+            vol += detJ
+
+        # Lumped mass: rho * vol / 8 for each node
+        m_node = rho_sym * vol / 8.0
+        m_lumped = [m_node] * 8
+
+        op_mass = MathModel(
+            inputs=coord_syms + [rho_sym],
+            outputs=m_lumped,
+            name=f"{self.name}_op_lumped_mass",
+            input_names=[f"coord[{i}]" for i in range(24)] + ["rho"],
+            is_operator=True
+        )
+
+        return [op_mass]
