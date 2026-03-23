@@ -10,6 +10,7 @@
 #include "../../data_center/components/mesh_components.h"
 #include "../../data_center/components/property_components.h"
 #include "c3d8r/C3D8RInternalForce.h"
+#include "tet4/Tet4InternalForce.h"
 #include "spdlog/spdlog.h"
 
 void InternalForceSystem::reset_internal_forces(entt::registry& registry) {
@@ -65,13 +66,12 @@ void InternalForceSystem::compute_internal_forces(entt::registry& registry) {
                 break;
             }
 
-            // Future element types can be added here:
-            // case 304: {  // Tetra4
-            //     if (compute_tet4_internal_forces(registry, element_entity)) {
-            //         element_count++;
-            //     }
-            //     break;
-            // }
+            case 304: {  // Tetra4
+                if (compute_tet4_internal_forces(registry, element_entity)) {
+                    element_count++;
+                }
+                break;
+            }
 
             default:
                 break;
