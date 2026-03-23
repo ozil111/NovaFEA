@@ -10,6 +10,7 @@
 #include "../../data_center/components/mesh_components.h"
 #include "../../data_center/components/property_components.h"
 #include "c3d8/C3D8Mass.h"
+#include "tet4/Tet4Mass.h"
 #include "spdlog/spdlog.h"
 
 void MassSystem::compute_lumped_mass(entt::registry& registry) {
@@ -58,13 +59,12 @@ void MassSystem::compute_lumped_mass(entt::registry& registry) {
                 break;
             }
             
-            // Future element types can be added here:
-            // case 304: {  // Tetra4
-            //     if (compute_tet4_mass(registry, element_entity)) {
-            //         element_count++;
-            //     }
-            //     break;
-            // }
+            case 304: {  // Tetra4
+                if (compute_tet4_mass(registry, element_entity)) {
+                    element_count++;
+                }
+                break;
+            }
             
             default:
                 // Skip unsupported element types

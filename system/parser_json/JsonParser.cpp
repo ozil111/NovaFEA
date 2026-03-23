@@ -22,7 +22,7 @@
 using json = nlohmann::json;
 
 // ============================================================================
-// 主解析入�?
+// 主解析入�?
 // ============================================================================
 bool JsonParser::parse(const std::string& filepath, DataContext& data_context) {
     spdlog::debug("JsonParser started for file: {}", filepath);
@@ -36,19 +36,19 @@ bool JsonParser::parse(const std::string& filepath, DataContext& data_context) {
 
     json j;
     try {
-        // 启用 nlohmann::json 的注释支�?
-        // 注意：需�?nlohmann::json 3.10.0+ 版本
-        j = json::parse(file, nullptr, true, true);  // 最后一个参数启用注释忽�?
+        // 启用 nlohmann::json 的注释支�?
+        // 注意：需�?nlohmann::json 3.10.0+ 版本
+        j = json::parse(file, nullptr, true, true);  // 最后一个参数启用注释忽�?
     } catch (const json::exception& e) {
         spdlog::error("JSON parsing error: {}", e.what());
         return false;
     }
 
-    // 2. 清空 DataContext，从干净状态开�?
+    // 2. 清空 DataContext，从干净状态开�?
     data_context.clear();
     auto& registry = data_context.registry;
 
-    // 3. 准备所有的 ID -> entity 映射�?
+    // 3. 准备所有的 ID -> entity 映射�?
     std::unordered_map<int, entt::entity> material_id_map;
     std::unordered_map<int, entt::entity> property_id_map;
     std::unordered_map<int, entt::entity> node_id_map;
@@ -61,9 +61,9 @@ bool JsonParser::parse(const std::string& filepath, DataContext& data_context) {
     std::unordered_map<int, entt::entity> analysis_id_map;
     std::unordered_map<int, entt::entity> output_id_map;
 
-    // 4. 按照严格的依赖顺序执�?N-Step 解析
+    // 4. 按照严格的依赖顺序执�?N-Step 解析
     try {
-        // 步骤 1: Material (无依�?
+        // 步骤 1: Material (无依�?
         if (j.contains("material")) {
             parse_materials(j, registry, material_id_map);
         }
@@ -74,7 +74,7 @@ bool JsonParser::parse(const std::string& filepath, DataContext& data_context) {
             parse_properties(j, registry, material_id_map, property_id_map, property_id_to_material);
         }
 
-        // 步骤 3: Node (无依�?
+        // 步骤 3: Node (无依�?
         if (j.contains("mesh") && j["mesh"].contains("nodes")) {
             parse_nodes(j, registry, node_id_map);
         }
@@ -84,7 +84,7 @@ bool JsonParser::parse(const std::string& filepath, DataContext& data_context) {
             parse_elements(j, registry, node_id_map, property_id_map, element_id_map);
         }
 
-        // 步骤 4.5: �?Property 构建 SimdroidPart 与单元集（材料通过 Part 绑定�?
+        // 步骤 4.5: �?Property 构建 SimdroidPart 与单元集（材料通过 Part 绑定�?
         if (j.contains("property") && j.contains("mesh") && j["mesh"].contains("elements")) {
             build_parts_from_properties(registry, property_id_map, property_id_to_material, element_id_map);
         }
@@ -109,7 +109,7 @@ bool JsonParser::parse(const std::string& filepath, DataContext& data_context) {
             parse_loads(j, registry, load_id_map, curve_id_map);
         }
 
-        // 步骤 8: Boundary (无依�?
+        // 步骤 8: Boundary (无依�?
         if (j.contains("boundary")) {
             parse_boundaries(j, registry, boundary_id_map);
         }
@@ -124,10 +124,10 @@ bool JsonParser::parse(const std::string& filepath, DataContext& data_context) {
             apply_boundaries(j, registry, boundary_id_map, nodeset_id_map);
         }
 
-        // 步骤 11: 解析 Analysis (无依赖，但应在最后解�?
+        // 步骤 11: 解析 Analysis (无依赖，但应在最后解）
         if (j.contains("analysis") && j["analysis"].is_array() && !j["analysis"].empty()) {
             parse_analysis(j, registry, analysis_id_map);
-            // 取第一个分析配置对应的 entity 同步�?DataContext
+            // 取第一个分析配置对应的 entity 同步到DataContext
             const auto& analysis_config = j["analysis"][0];
             if (analysis_config.contains("aid") && analysis_config["aid"].is_number_integer()) {
                 int first_aid = analysis_config["aid"].get<int>();
@@ -141,7 +141,7 @@ bool JsonParser::parse(const std::string& filepath, DataContext& data_context) {
             spdlog::debug("No 'analysis' field found, defaulting to 'static' analysis");
         }
 
-        // 步骤 12: 解析 Output (无依赖，但应在最后解�?
+        // 步骤 12: 解析 Output (无依赖，但应在最后解�?
         if (j.contains("output")) {
             parse_output(j, registry, output_id_map);
             auto it = output_id_map.find(0);
@@ -156,7 +156,7 @@ bool JsonParser::parse(const std::string& filepath, DataContext& data_context) {
         return false;
     }
 
-    // 5. 统计并报�?
+    // 5. 统计并报�?
     auto node_count = registry.view<Component::Position>().size();
     auto element_count = registry.view<Component::Connectivity>().size();
     auto material_count = material_id_map.size();
@@ -182,7 +182,7 @@ void JsonParser::parse_materials(
         int mid = mat["mid"];
         int type_id = mat["typeid"];
 
-        // 检查重�?ID
+        // 检查重�?ID
         if (material_id_map.count(mid)) {
             spdlog::warn("Duplicate material ID {}. Skipping.", mid);
             continue;
@@ -191,9 +191,9 @@ void JsonParser::parse_materials(
         entt::entity e = registry.create();
         registry.emplace<Component::MaterialID>(e, mid);
 
-        // 根据 type_id 附加不同的参数组�?
+        // 根据 type_id 附加不同的参数组�?
         switch (type_id) {
-            case 1: { // 线弹性材�?
+            case 1: { // 线弹性材�?
                 Component::LinearElasticParams params;
                 params.rho = mat["rho"];
                 params.E = mat["E"];
@@ -234,7 +234,7 @@ void JsonParser::parse_properties(
         int mid = prop["mid"];
         int type_id = prop["typeid"];
 
-        // 检查重�?ID
+        // 检查重�?ID
         if (property_id_map.count(pid)) {
             spdlog::warn("Duplicate property ID {}. Skipping.", pid);
             continue;
@@ -250,9 +250,9 @@ void JsonParser::parse_properties(
         entt::entity e = registry.create();
         registry.emplace<Component::PropertyID>(e, pid);
 
-        // 根据 type_id 附加不同的属性组�?
+        // 根据 type_id 附加不同的属性组�?
         switch (type_id) {
-            case 1: { // 固体单元属�?
+            case 1: { // 固体单元属�?
                 Component::SolidProperty solid_prop;
                 solid_prop.type_id = type_id;
                 solid_prop.integration_network = prop["integration_network"];
@@ -262,14 +262,14 @@ void JsonParser::parse_properties(
                               pid, solid_prop.integration_network, solid_prop.hourglass_control);
                 break;
             }
-            // 未来可以添加其他属性类�?
+            // 未来可以添加其他属性类�?
             // case 2: { /* Shell Property */ break; }
             default:
                 spdlog::warn("Unknown property typeid: {}. Skipping parameters.", type_id);
                 break;
         }
 
-        // 材料通过 SimdroidPart 绑定，此处仅记录 pid -> material 供后续创�?Part 使用
+        // 材料通过 SimdroidPart 绑定，此处仅记录 pid -> material 供后续创�?Part 使用
         property_id_to_material[pid] = mat_it->second;
 
         property_id_map[pid] = e;
@@ -291,7 +291,7 @@ void JsonParser::parse_nodes(
     for (const auto& node : j["mesh"]["nodes"]) {
         int nid = node["nid"];
 
-        // 检查重�?ID
+        // 检查重�?ID
         if (node_id_map.count(nid)) {
             spdlog::warn("Duplicate node ID {}. Skipping.", nid);
             continue;
@@ -329,7 +329,7 @@ void JsonParser::parse_elements(
         int etype = elem["etype"];
         int pid = elem["pid"];
 
-        // 检查重�?ID
+        // 检查重�?ID
         if (element_id_map.count(eid)) {
             spdlog::warn("Duplicate element ID {}. Skipping.", eid);
             continue;
@@ -346,7 +346,7 @@ void JsonParser::parse_elements(
         registry.emplace<Component::ElementID>(e, eid);
         registry.emplace<Component::ElementType>(e, etype);
 
-        // 建立连接�?
+        // 建立连接�?
         auto& conn = registry.emplace<Component::Connectivity>(e);
         for (int nid : elem["nids"]) {
             auto node_it = node_id_map.find(nid);
@@ -357,7 +357,7 @@ void JsonParser::parse_elements(
             conn.nodes.push_back(node_it->second);
         }
 
-        // 建立�?Property 的引用（核心！）
+        // 建立�?Property 的引用（核心！）
         registry.emplace<Component::PropertyRef>(e, prop_it->second);
 
         element_id_map[eid] = e;
@@ -367,7 +367,7 @@ void JsonParser::parse_elements(
 }
 
 // ============================================================================
-// 步骤 4.5: �?Property 构建 SimdroidPart 与单元集
+// 步骤 4.5: �?Property 构建 SimdroidPart 与单元集
 // ============================================================================
 void JsonParser::build_parts_from_properties(
     entt::registry& registry,
@@ -384,7 +384,7 @@ void JsonParser::build_parts_from_properties(
         }
         entt::entity material_entity = mat_it->second;
 
-        // 收集使用�?pid 的所有单�?
+        // 收集使用�?pid 的所有单�?
         std::vector<entt::entity> members;
         for (const auto& [eid, element_entity] : element_id_map) {
             if (!registry.all_of<Component::PropertyRef>(element_entity)) {
@@ -403,13 +403,13 @@ void JsonParser::build_parts_from_properties(
             continue;
         }
 
-        // 创建单元�?
+        // 创建单元�?
         entt::entity ele_set_entity = registry.create();
         registry.emplace<Component::SetName>(ele_set_entity, "Part_pid_" + std::to_string(pid));
         auto& set_members = registry.emplace<Component::ElementSetMembers>(ele_set_entity);
         set_members.members = std::move(members);
 
-        // 创建 Part（绑�?几何/截面/材料�?
+        // 创建 Part（绑�?几何/截面/材料�?
         Component::SimdroidPart part;
         part.name = "Part_pid_" + std::to_string(pid);
         part.element_set = ele_set_entity;
@@ -437,7 +437,7 @@ void JsonParser::parse_nodesets(
         int nsid = nset["nsid"];
         std::string name = nset["name"];
 
-        // 检查重�?ID
+        // 检查重�?ID
         if (nodeset_id_map.count(nsid)) {
             spdlog::warn("Duplicate nodeset ID {}. Skipping.", nsid);
             continue;
@@ -480,7 +480,7 @@ void JsonParser::parse_elesets(
         int esid = eset["esid"];
         std::string name = eset["name"];
 
-        // 检查重�?ID
+        // 检查重�?ID
         if (eleset_id_map.count(esid)) {
             spdlog::warn("Duplicate eleset ID {}. Skipping.", esid);
             continue;
@@ -522,7 +522,7 @@ void JsonParser::parse_curves(
         int cid = curve["cid"];
         std::string type = curve["type"];
 
-        // 检查重�?ID
+        // 检查重�?ID
         if (curve_id_map.count(cid)) {
             spdlog::warn("Duplicate curve ID {}. Skipping.", cid);
             continue;
@@ -583,7 +583,7 @@ void JsonParser::parse_loads(
         int lid = load["lid"];
         int type_id = load["typeid"];
 
-        // 检查重�?ID
+        // 检查重�?ID
         if (load_id_map.count(lid)) {
             spdlog::warn("Duplicate load ID {}. Skipping.", lid);
             continue;
@@ -592,14 +592,14 @@ void JsonParser::parse_loads(
         entt::entity e = registry.create();
         registry.emplace<Component::LoadID>(e, lid);
 
-        // 根据 type_id 附加不同的载荷组�?
+        // 根据 type_id 附加不同的载荷组�?
         switch (type_id) {
             case 1: { // 节点载荷
                 Component::NodalLoad nodal_load;
                 nodal_load.type_id = type_id;
                 nodal_load.dof = load["dof"];
                 nodal_load.value = load["value"];
-                // curve_entity 在下方解�?curve �?patch 写入
+                // curve_entity 在下方解�?curve �?patch 写入
                 registry.emplace<Component::NodalLoad>(e, nodal_load);
                 spdlog::debug("  Created NodalLoad {}: dof={}, value={}",
                               lid, nodal_load.dof, nodal_load.value);
@@ -631,7 +631,7 @@ void JsonParser::parse_loads(
         if (curve_entity == entt::null) {
             auto default_curve_it = curve_id_map.find(0);
             if (default_curve_it != curve_id_map.end()) {
-                // 默认curve已存在，使用�?
+                // 默认curve已存在，使用�?
                 curve_entity = default_curve_it->second;
                 spdlog::debug("  Load {} using default Curve 0", lid);
             } else {
@@ -651,7 +651,7 @@ void JsonParser::parse_loads(
             }
         }
         
-        // �?curve 写入 NodalLoad.curve_entity（仅节点载荷�?
+        // �?curve 写入 NodalLoad.curve_entity（仅节点载荷�?
         if (curve_entity != entt::null && registry.all_of<Component::NodalLoad>(e)) {
             registry.patch<Component::NodalLoad>(e, [curve_entity](auto& nl) { nl.curve_entity = curve_entity; });
         }
@@ -676,7 +676,7 @@ void JsonParser::parse_boundaries(
         int bid = bnd["bid"];
         int type_id = bnd["typeid"];
 
-        // 检查重�?ID
+        // 检查重�?ID
         if (boundary_id_map.count(bid)) {
             spdlog::warn("Duplicate boundary ID {}. Skipping.", bid);
             continue;
@@ -685,7 +685,7 @@ void JsonParser::parse_boundaries(
         entt::entity e = registry.create();
         registry.emplace<Component::BoundaryID>(e, bid);
 
-        // 根据 type_id 附加不同的边界组�?
+        // 根据 type_id 附加不同的边界组�?
         switch (type_id) {
             case 1: { // 单点约束 (SPC)
                 Component::BoundarySPC spc;
@@ -710,7 +710,7 @@ void JsonParser::parse_boundaries(
 }
 
 // ============================================================================
-// 步骤 9: 应用 Load �?Node（建立引用关系）
+// 步骤 9: 应用 Load �?Node（建立引用关系）
 // ============================================================================
 void JsonParser::apply_loads(
     const json& j,
@@ -738,12 +738,12 @@ void JsonParser::apply_loads(
             continue;
         }
 
-        // 3. 获取�?Set 的所�?Node 成员
+        // 3. 获取�?Set 的所�?Node 成员
         const auto& members = registry.get<Component::NodeSetMembers>(nodeset_it->second);
 
-        // 4. �?Load 引用附加到每�?Node 实体上（核心！）
+        // 4. �?Load 引用附加到每�?Node 实体上（核心！）
         for (entt::entity node_e : members.members) {
-            // 允许一个节点应用多个载荷（1-to-Many�?
+            // 允许一个节点应用多个载荷（1-to-Many�?
             auto& applied = registry.get_or_emplace<Component::AppliedLoadRef>(node_e);
             applied.load_entities.push_back(load_it->second);
         }
@@ -755,7 +755,7 @@ void JsonParser::apply_loads(
 }
 
 // ============================================================================
-// 步骤 10: 应用 Boundary �?Node（建立引用关系）
+// 步骤 10: 应用 Boundary �?Node（建立引用关系）
 // ============================================================================
 void JsonParser::apply_boundaries(
     const json& j,
@@ -783,10 +783,10 @@ void JsonParser::apply_boundaries(
             continue;
         }
 
-        // 3. 获取�?Set 的所�?Node 成员
+        // 3. 获取�?Set 的所�?Node 成员
         const auto& members = registry.get<Component::NodeSetMembers>(nodeset_it->second);
 
-        // 4. �?Boundary 引用附加到每�?Node 实体上（核心！）
+        // 4. �?Boundary 引用附加到每�?Node 实体上（核心！）
         for (entt::entity node_e : members.members) {
             auto& applied = registry.get_or_emplace<Component::AppliedBoundaryRef>(node_e);
             applied.boundary_entities.push_back(bnd_it->second);
