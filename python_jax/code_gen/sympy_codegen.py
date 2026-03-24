@@ -3,6 +3,7 @@ from sympy.printing.c import ccode
 from sympy.printing.numpy import JaxPrinter
 import argparse
 import sys
+import importlib.util
 import importlib
 from pathlib import Path
 

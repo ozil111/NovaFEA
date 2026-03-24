@@ -85,7 +85,11 @@ def get_polystress_model() -> MathModel:
         D3,
     ]
     outputs = [sig11, sig22, sig33, sig12, sig23, sig31]
-    return MathModel(name="polystress_nomullins", inputs=inputs, outputs=outputs)
+    model = MathModel(name="polystress_nomullins", inputs=inputs, outputs=outputs)
+    # Keep compatibility with sympy_codegen.FEACompiler expectations.
+    model.input_names = [str(s) for s in inputs]
+    model.is_operator = False
+    return model
 
 
 def get_model() -> MathModel:
