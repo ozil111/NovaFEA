@@ -1,5 +1,5 @@
 import sympy as sp
-from sympy.printing.c import ccode
+from sympy.printing.c import C99CodePrinter
 from sympy.printing.numpy import JaxPrinter
 import argparse
 import sys
@@ -16,6 +16,63 @@ from definitions.abc import Element, Material
 # ---------------------------------------------------------------------------
 # 数据容器 + 静态编译分发
 # ---------------------------------------------------------------------------
+class FEACodePrinter(C99CodePrinter):
+    """
+    专门为有限元计算优化的代码打印机：
+    1. 展开低次幂 pow(x, 2) -> (x*x)
+    2. 优化倒数 pow(x, -1) -> (1.0/(x))
+    3. 优化平方根和立方根，及分数次幂组合
+    """
+    def _print_Pow(self, expr):
+        base, exp = expr.as_base_exp()
+        s_base = self._print(base)
+        
+        # 处理整数幂 (2, 3, -1, -2)
+        if exp.is_Integer:
+            if exp == 2:
+                return f"({s_base} * {s_base})"
+            elif exp == 3:
+                return f"({s_base} * {s_base} * {s_base})"
+            elif exp == -1:
+                return f"(1.0 / ({s_base}))"
+            elif exp == -2:
+                return f"(1.0 / ({s_base} * {s_base}))"
+        
+        # 处理分数幂，尽量转化为 sqrt 和 cbrt 的乘除法
+        # 注意：这里使用浮点比较处理 SymPy 的 Rational 或 Float
+        try:
+            val = float(exp)
+        except TypeError:
+            return super()._print_Pow(expr)
+
+        # 1/2 系列 (sqrt)
+        if abs(val - 0.5) < 1e-9:
+            return f"sqrt({s_base})"
+        if abs(val + 0.5) < 1e-9:
+            return f"(1.0 / sqrt({s_base}))"
+        
+        # 1/3 系列 (cbrt)
+        if abs(val - 1.0/3.0) < 1e-7:
+            return f"cbrt({s_base})"
+        if abs(val + 1.0/3.0) < 1e-7:
+            return f"(1.0 / cbrt({s_base}))"
+        
+        # 2/3 系列
+        if abs(val - 2.0/3.0) < 1e-7:
+            return f"(cbrt({s_base}) * cbrt({s_base}))"
+        if abs(val + 2.0/3.0) < 1e-7:
+            return f"(1.0 / (cbrt({s_base}) * cbrt({s_base})))"
+            
+        # 5/6 系列 (5/6 = 1/2 + 1/3)
+        if abs(val - 5.0/6.0) < 1e-7:
+            return f"(sqrt({s_base}) * cbrt({s_base}))"
+        if abs(val + 5.0/6.0) < 1e-7:
+            return f"(1.0 / (sqrt({s_base}) * cbrt({s_base})))"
+
+        # 其他情况回退到标准 pow
+        return super()._print_Pow(expr)
+
+
 class MathModel:
     """数据容器：存储数学定义"""
     def __init__(self, inputs, outputs, name="kernel", input_names=None, is_operator=False):
@@ -130,12 +187,8 @@ class FEACompiler:
         # --- Generate Function Body ---
         body_lines = []
         
-        # 强制内存对齐提示 (针对 C++)
-        if not is_cuda:
-            # 对于现代编译器，我们可以提示输入输出是对齐的
-            # body_lines.append("    const double* __restrict__ pin = (const double*)__builtin_assume_aligned(in, 64);")
-            # body_lines.append("    double* __restrict__ pout = (double*)__builtin_assume_aligned(out, 64);")
-            pass
+        # 初始化自定义 Printer
+        printer = FEACodePrinter()
 
         all_simplified_outputs = []
         
@@ -146,10 +199,10 @@ class FEACompiler:
             
             body_lines.append(f"\n    // --- Chunk {i//chunk_size} ---")
             for var, expr in sub_exprs:
-                body_lines.append(f"    double {var} = {ccode(expr)};")
+                body_lines.append(f"    double {var} = {printer.doprint(expr)};")
             
             for j, out_expr in enumerate(simplified_chunk):
-                body_lines.append(f"    out[{i + j}] = {ccode(out_expr)};")
+                body_lines.append(f"    out[{i + j}] = {printer.doprint(out_expr)};")
 
         func_type = "__device__ void" if is_cuda else "inline void"
         if not is_cuda:
