@@ -24,7 +24,7 @@ The primary script is `sympy_codegen.py`.
 -   `--material <name>`: Material name (e.g., `isotropic`).
 -   `--element <name>`: Element name (e.g., `tet4`, `hex8`).
 -   `--script <path>`: Path to a Python script for custom tasks.
--   `--target {cpp,cuda,jax,all}`: **(Required)** Target language.
+-   `--target {cpp,cuda,jax,peachpy,all}`: **(Required)** Target language.
 -   `--output <path>`: (Optional) Output file or directory.
 
 ## 3. Advanced Features
@@ -70,3 +70,28 @@ Ke = kernels["tet4_op_assembly"](jnp.concatenate([dN_dx, d_matrix, jnp.array([de
 # 4. Compute Lumped Mass
 Me_lumped = kernels["tet4_op_lumped_mass"](jnp.concatenate([coords_flat, jnp.array([rho])]))
 ```
+
+## 6. PeachPy Workflow (Custom Model)
+
+Use this flow to generate a PeachPy script from a custom SymPy model, then assemble it into a `.obj` and C header.
+
+### 6.1 Generate PeachPy Python Script
+
+```bash
+python .\sympy_codegen.py --task custom --script .\test_polystress.py --target peachpy
+```
+
+Output example:
+- `polystress_nomullins_peachpy.py`
+
+> Note: for `--task custom`, the script must define `get_model()`.
+
+### 6.2 Assemble to Object + Header
+
+```bash
+python -m peachpy.x86_64 .\polystress_nomullins_peachpy.py -mabi=ms -mimage-format=ms-coff -o polystress_kernel.obj -emit-c-header polystress_kernel.h
+```
+
+Output example:
+- `polystress_kernel.obj`
+- `polystress_kernel.h`

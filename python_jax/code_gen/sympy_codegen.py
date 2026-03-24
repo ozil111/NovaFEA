@@ -1,8 +1,9 @@
 import sympy as sp
-from sympy.printing.c import ccode
+from sympy.printing.c import C99CodePrinter
 from sympy.printing.numpy import JaxPrinter
 import argparse
 import sys
+import importlib.util
 import importlib
 from pathlib import Path
 
@@ -15,6 +16,63 @@ from definitions.abc import Element, Material
 # ---------------------------------------------------------------------------
 # 数据容器 + 静态编译分发
 # ---------------------------------------------------------------------------
+class FEACodePrinter(C99CodePrinter):
+    """
+    专门为有限元计算优化的代码打印机：
+    1. 展开低次幂 pow(x, 2) -> (x*x)
+    2. 优化倒数 pow(x, -1) -> (1.0/(x))
+    3. 优化平方根和立方根，及分数次幂组合
+    """
+    def _print_Pow(self, expr):
+        base, exp = expr.as_base_exp()
+        s_base = self._print(base)
+        
+        # 处理整数幂 (2, 3, -1, -2)
+        if exp.is_Integer:
+            if exp == 2:
+                return f"({s_base} * {s_base})"
+            elif exp == 3:
+                return f"({s_base} * {s_base} * {s_base})"
+            elif exp == -1:
+                return f"(1.0 / ({s_base}))"
+            elif exp == -2:
+                return f"(1.0 / ({s_base} * {s_base}))"
+        
+        # 处理分数幂，尽量转化为 sqrt 和 cbrt 的乘除法
+        # 注意：这里使用浮点比较处理 SymPy 的 Rational 或 Float
+        try:
+            val = float(exp)
+        except TypeError:
+            return super()._print_Pow(expr)
+
+        # 1/2 系列 (sqrt)
+        if abs(val - 0.5) < 1e-9:
+            return f"sqrt({s_base})"
+        if abs(val + 0.5) < 1e-9:
+            return f"(1.0 / sqrt({s_base}))"
+        
+        # 1/3 系列 (cbrt)
+        if abs(val - 1.0/3.0) < 1e-7:
+            return f"cbrt({s_base})"
+        if abs(val + 1.0/3.0) < 1e-7:
+            return f"(1.0 / cbrt({s_base}))"
+        
+        # 2/3 系列
+        if abs(val - 2.0/3.0) < 1e-7:
+            return f"(cbrt({s_base}) * cbrt({s_base}))"
+        if abs(val + 2.0/3.0) < 1e-7:
+            return f"(1.0 / (cbrt({s_base}) * cbrt({s_base})))"
+            
+        # 5/6 系列 (5/6 = 1/2 + 1/3)
+        if abs(val - 5.0/6.0) < 1e-7:
+            return f"(sqrt({s_base}) * cbrt({s_base}))"
+        if abs(val + 5.0/6.0) < 1e-7:
+            return f"(1.0 / (sqrt({s_base}) * cbrt({s_base})))"
+
+        # 其他情况回退到标准 pow
+        return super()._print_Pow(expr)
+
+
 class MathModel:
     """数据容器：存储数学定义"""
     def __init__(self, inputs, outputs, name="kernel", input_names=None, is_operator=False):
@@ -29,8 +87,8 @@ class FEACompiler:
     @staticmethod
     def compile(model: MathModel, target: str):
         """
-        核心分发器：输入 MathModel + target，输出 cpp/cuda/jax 源码字符串。
-        target: 'jax', 'cpp', 'cuda'
+        核心分发器：输入 MathModel + target，输出 cpp/cuda/jax/peachpy 源码字符串。
+        target: 'jax', 'cpp', 'cuda', 'peachpy'
         """
         target = target.lower()
         if target == 'jax':
@@ -39,16 +97,19 @@ class FEACompiler:
             return FEACompiler._to_source(model, is_cuda=False)
         elif target == 'cuda':
             return FEACompiler._to_source(model, is_cuda=True)
+        elif target == 'peachpy':
+            return FEACompiler._to_peachpy(model)
         else:
             raise ValueError(f"Unknown target: {target}")
 
     @staticmethod
     def compile_all(model: MathModel):
-        """一次性生成 jax/cpp/cuda 三种目标源码。"""
+        """一次性生成 jax/cpp/cuda/peachpy 四种目标源码。"""
         return {
             "jax": FEACompiler._to_jax(model),
             "cpp": FEACompiler._to_source(model, is_cuda=False),
             "cuda": FEACompiler._to_source(model, is_cuda=True),
+            "peachpy": FEACompiler._to_peachpy(model),
         }
 
     @staticmethod
@@ -126,12 +187,8 @@ class FEACompiler:
         # --- Generate Function Body ---
         body_lines = []
         
-        # 强制内存对齐提示 (针对 C++)
-        if not is_cuda:
-            # 对于现代编译器，我们可以提示输入输出是对齐的
-            # body_lines.append("    const double* __restrict__ pin = (const double*)__builtin_assume_aligned(in, 64);")
-            # body_lines.append("    double* __restrict__ pout = (double*)__builtin_assume_aligned(out, 64);")
-            pass
+        # 初始化自定义 Printer
+        printer = FEACodePrinter()
 
         all_simplified_outputs = []
         
@@ -142,10 +199,10 @@ class FEACompiler:
             
             body_lines.append(f"\n    // --- Chunk {i//chunk_size} ---")
             for var, expr in sub_exprs:
-                body_lines.append(f"    double {var} = {ccode(expr)};")
+                body_lines.append(f"    double {var} = {printer.doprint(expr)};")
             
             for j, out_expr in enumerate(simplified_chunk):
-                body_lines.append(f"    out[{i + j}] = {ccode(out_expr)};")
+                body_lines.append(f"    out[{i + j}] = {printer.doprint(out_expr)};")
 
         func_type = "__device__ void" if is_cuda else "inline void"
         if not is_cuda:
@@ -155,6 +212,140 @@ class FEACompiler:
         body = "\n".join(body_lines)
         
         return f"{comment_block}\n{func_type} compute_{model.name}(const double* __restrict__ in, double* __restrict__ out) {{ \n{body}\n}}"
+
+    @staticmethod
+    def _to_peachpy(model):
+        """生成 PeachPy 源码 (.py)"""
+        class PeachPyEmitter:
+            def __init__(self, model):
+                self.model = model
+                self.model_name = model.name
+                self.lines = [
+                    '"""Generated by sympy_codegen.py. Do not edit."""',
+                    "from peachpy import *",
+                    "from peachpy.x86_64 import *",
+                    "import re",
+                    "",
+                    "in_ptr = Argument(ptr(const_double_), name=\"in\")",
+                    "out_ptr = Argument(ptr(double_), name=\"out\")",
+                    "",
+                    f"with Function(\"compute_{self.model_name}\", (in_ptr, out_ptr)) as function:",
+                    "    reg_in = GeneralPurposeRegister64()",
+                    "    reg_out = GeneralPurposeRegister64()",
+                    "    LOAD.ARGUMENT(reg_in, in_ptr)",
+                    "    LOAD.ARGUMENT(reg_out, out_ptr)",
+                    "",
+                    "    # Cache for input variables and constants",
+                    "    v_map = {} # sym_obj -> register_name",
+                    "    constants = {} # value -> register_name",
+                    ""
+                ]
+                self.v_map = {} # sym_obj -> register_name
+                self.constants = {}
+                self.tmp_by_depth = {}
+
+            def get_reg(self, sym, is_new=False):
+                if sym not in self.v_map or is_new:
+                    reg_name = f"v_{len(self.v_map)}"
+                    self.lines.append(f"    {reg_name} = XMMRegister()")
+                    self.v_map[sym] = reg_name
+                return self.v_map[sym]
+
+            def handle_const(self, val):
+                val_f = float(val)
+                if val_f not in self.constants:
+                    reg = f"c_{len(self.constants)}"
+                    self.lines.append(f"    {reg} = XMMRegister()")
+                    self.lines.append(f"    MOVSD({reg}, Constant.float64({val_f}))")
+                    self.constants[val_f] = reg
+                return self.constants[val_f]
+
+            def get_val_code(self, val):
+                if val.is_Number:
+                    return self.handle_const(val)
+                
+                if val in self.v_map:
+                    return self.v_map[val]
+                
+                s_val = str(val)
+                # Check for in[i] pattern
+                if s_val.startswith("in["):
+                    idx_str = s_val[3:-1]
+                    if idx_str.isdigit():
+                        return f"[reg_in + {int(idx_str)*8}]"
+
+                import re
+                match = re.match(r"in\[(\d+)\]", s_val)
+                if match:
+                    idx = int(match.group(1))
+                    return f"[reg_in + {idx*8}]"
+
+                # Check named inputs
+                for idx, inp in enumerate(self.model.inputs):
+                    if inp == val or str(inp) == s_val:
+                        return f"[reg_in + {idx*8}]"
+                
+                return f"None # Error: {s_val} not found"
+
+            def emit(self, line):
+                self.lines.append(f"    {line}")
+
+            def get_tmp(self, depth):
+                if depth not in self.tmp_by_depth:
+                    reg_name = f"tmp_d{depth}"
+                    self.lines.append(f"    {reg_name} = XMMRegister()")
+                    self.tmp_by_depth[depth] = reg_name
+                return self.tmp_by_depth[depth]
+
+            def finalize(self):
+                self.lines.append("    RETURN()")
+                self.lines.append("")
+                return "\n".join(self.lines)
+
+        emitter = PeachPyEmitter(model)
+        outputs = model.outputs
+        
+        def _emit_recursive(e, target, depth=0):
+            if e.is_Number or e.is_Symbol:
+                emitter.emit(f"MOVSD({target}, {emitter.get_val_code(e)})")
+            elif isinstance(e, sp.Add):
+                _emit_recursive(e.args[0], target, depth)
+                for a in e.args[1:]:
+                    if a.is_Number or a.is_Symbol:
+                        emitter.emit(f"ADDSD({target}, {emitter.get_val_code(a)})")
+                    else:
+                        tmp = emitter.get_tmp(depth + 1)
+                        _emit_recursive(a, tmp, depth + 1)
+                        emitter.emit(f"ADDSD({target}, {tmp})")
+            elif isinstance(e, sp.Mul):
+                _emit_recursive(e.args[0], target, depth)
+                for a in e.args[1:]:
+                    if a.is_Number or a.is_Symbol:
+                        emitter.emit(f"MULSD({target}, {emitter.get_val_code(a)})")
+                    else:
+                        tmp = emitter.get_tmp(depth + 1)
+                        _emit_recursive(a, tmp, depth + 1)
+                        emitter.emit(f"MULSD({target}, {tmp})")
+            elif isinstance(e, sp.Pow) and e.args[1] == 2:
+                _emit_recursive(e.args[0], target, depth)
+                emitter.emit(f"MULSD({target}, {target})")
+            elif isinstance(e, sp.Pow) and e.args[1] == -1:
+                emitter.emit(f"MOVSD({target}, {emitter.handle_const(1.0)})")
+                if e.args[0].is_Number or e.args[0].is_Symbol:
+                    emitter.emit(f"DIVSD({target}, {emitter.get_val_code(e.args[0])})")
+                else:
+                    tmp = emitter.get_tmp(depth + 1)
+                    _emit_recursive(e.args[0], tmp, depth + 1)
+                    emitter.emit(f"DIVSD({target}, {tmp})")
+            else:
+                emitter.emit(f"# Warning: Unsupported expression: {e}")
+
+        tmp_out = emitter.get_tmp(0)
+        for j, out_expr in enumerate(outputs):
+            _emit_recursive(out_expr, tmp_out, 0)
+            emitter.emit(f"MOVSD([reg_out + {j*8}], {tmp_out})")
+
+        return emitter.finalize()
 
     @staticmethod
     def compile_element(element: Element, target: str):
@@ -206,6 +397,8 @@ def _default_output(model_name: str, target: str) -> str:
         return f"{model_name}_gen.cpp"
     if t == "cuda":
         return f"{model_name}_gen.cu"
+    if t == "peachpy":
+        return f"{model_name}_peachpy.py"
     return f"{model_name}_{t}.txt"
 
 def main():
@@ -233,8 +426,8 @@ def main():
     parser.add_argument(
         "--target", "-t",
         required=True,
-        choices=["jax", "cpp", "cuda", "all"],
-        help="目标语言：jax / cpp / cuda / all",
+        choices=["jax", "cpp", "cuda", "peachpy", "all"],
+        help="目标语言：jax / cpp / cuda / peachpy / all",
     )
     parser.add_argument(
         "--output", "-o",
