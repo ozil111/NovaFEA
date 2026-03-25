@@ -5,20 +5,20 @@
 
 namespace Component {
 
-    // 1. Simdroid 特有的 Part 定义（绑定器：几何 + 截面 + 材料）
-    // Python 中的 Part 在这里是一个 Entity，连接 ElementSet、Property、Material
+    // 1. Simdroid-specific Part definition (binder: geometry + section + material)
+    // In Python, Part here is an Entity, connecting ElementSet, Property, Material
     struct SimdroidPart {
         std::string name;
-        entt::entity element_set; // 几何范围（单元集）
-        entt::entity material;    // 指向 Material 实体
-        entt::entity section;     // 指向 Property（截面属性）实体
+        entt::entity element_set; // Geometric scope (element set)
+        entt::entity material;    // Points to Material entity
+        entt::entity section;     // Points to Property (section properties) entity
     };
 
     // ===================================================================
-    // 2. 接触定义 (Contact) — 拆分为多个细粒度 ECS 组件
+    // 2. Contact definition — split into multiple fine-grained ECS components
     // ===================================================================
 
-    // --- 枚举 ---
+    // --- Enums ---
 
     // /INTER/TYPE2 (Tie), /INTER/TYPE7 (N-S), /INTER/TYPE24 (General)
     enum class ContactInterType { Tie, NodeToSurface, General, Unknown };
@@ -44,7 +44,7 @@ namespace Component {
 
     enum class RuptureFlagType { TractionCompress, Traction };
 
-    // --- 核心组件 ---
+    // --- Core components ---
 
     struct ContactBase {
         std::string name;
@@ -56,7 +56,7 @@ namespace Component {
         ContactInterType type = ContactInterType::Unknown;
     };
 
-    // --- 特化参数组件 ---
+    // --- Specialized parameter components ---
 
     struct ContactFormulation {
         ContactFormulationType formulation = ContactFormulationType::Standard;
@@ -98,20 +98,20 @@ namespace Component {
         double max_t_dist = 0.0;
     };
 
-    // 3. 刚体/MPC 定义 (对传力路径至关重要)
+    // 3. Rigid body/MPC definition (crucial for force transmission paths)
     struct RigidBodyConstraint {
-        entt::entity master_node_set; // 或者 master_node entity
+        entt::entity master_node_set; // or master_node entity
         entt::entity slave_node_set;
     };
 
-    // 3b. Radioss /RBODY 刚体定义
+    // 3b. Radioss /RBODY rigid body definition
     enum class InertiaMode { Automatic = 2, Input = 3 };
 
     struct RigidBody {
-        entt::entity master_node = entt::null;      // 主节点实体 (node_ID)
-        entt::entity slave_node_set = entt::null;    // 从节点集实体 (grnd_ID)
+        entt::entity master_node = entt::null;      // Master node entity (node_ID)
+        entt::entity slave_node_set = entt::null;    // Slave node set entity (grnd_ID)
 
-        std::string coord_sys;                       // 局部坐标系 ID/名称 (Skew_ID)
+        std::string coord_sys;                       // Local coordinate system ID/name (Skew_ID)
         InertiaMode inertia_cal = InertiaMode::Automatic; // Ispher
         
         double mass = 0.0;
@@ -119,18 +119,18 @@ namespace Component {
         double inertia_tensor[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}; // I11, I22, I33, I12, I23, I13
     };
     
-    // 4. 分析结果组件 (用于存储传力路径分析结果，避免重复计算)
+    // 4. Analysis result components (for storing force path analysis results, avoiding redundant computation)
     struct ForcePathNode {
         double weight;
         bool is_load_point;
         bool is_constraint_point;
     };
 
-    // 5. [新增] 刚性墙定义
+    // 5. [New] Rigid wall definition
     struct RigidWall {
         int id;
         std::string type; // "Planar", "Cylindrical", "Spherical"
-        std::vector<double> parameters; // 平面方程 ax+by+cz+d=0 或圆柱参数等
-        entt::entity secondary_node_set; // 关联的从节点集（可选）
+        std::vector<double> parameters; // Plane equation ax+by+cz+d=0 or cylinder parameters, etc.
+        entt::entity secondary_node_set; // Associated slave node set (optional)
     };
 }

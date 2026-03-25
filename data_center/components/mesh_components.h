@@ -40,28 +40,28 @@ namespace Component {
     };
 
     /**
-     * @brief [已废弃] Stores the original ID from the input file
-     * @details 为了保持一致性并避免ID冲突，现在使用专门的ID组件�?
-     *   - Node 使用 NodeID
-     *   - Element 使用 ElementID
-     *   此组件保留用于向后兼容，但新代码应使用专门的ID组件
-     * @deprecated 使用 NodeID �?ElementID 替代
+     * @brief [Deprecated] Stores the original ID from the input file
+     * @details To maintain consistency and avoid ID conflicts, now use dedicated ID components:
+     *   - Node uses NodeID
+     *   - Element uses ElementID
+     *   This component is retained for backward compatibility, but new code should use dedicated ID components
+     * @deprecated Use NodeID and ElementID instead
      */
     struct OriginalID {
         int value;
     };
 
     /**
-     * @brief [新] 附加�?Node 实体，存储其用户定义的ID (nid)
-     * @details 用于标识Node实体，避免与其他类型实体的ID冲突
+     * @brief [New] Attached to Node entity, stores its user-defined ID (nid)
+     * @details Used to identify Node entity, avoiding ID conflicts with other types of entities
      */
     struct NodeID {
         int value;
     };
 
     /**
-     * @brief [新] 附加�?Element 实体，存储其用户定义的ID (eid)
-     * @details 用于标识Element实体，避免与其他类型实体的ID冲突
+     * @brief [New] Attached to Element entity, stores its user-defined ID (eid)
+     * @details Used to identify Element entity, avoiding ID conflicts with other types of entities
      */
     struct ElementID {
         int value;
@@ -164,16 +164,16 @@ namespace Component {
     };
 
     /**
-     * @brief [新] 附加�?NodeSet 实体，存储其用户定义的ID (nsid)
-     * @details 用于标识NodeSet实体，避免与其他类型实体的ID冲突
+     * @brief [New] Attached to NodeSet entity, stores its user-defined ID (nsid)
+     * @details Used to identify NodeSet entity, avoiding ID conflicts with other types of entities
      */
     struct NodeSetID {
         int value;
     };
 
     /**
-     * @brief [新] 附加�?EleSet 实体，存储其用户定义的ID (esid)
-     * @details 用于标识EleSet实体，避免与其他类型实体的ID冲突
+     * @brief [New] Attached to EleSet entity, stores its user-defined ID (esid)
+     * @details Used to identify EleSet entity, avoiding ID conflicts with other types of entities
      */
     struct EleSetID {
         int value;
@@ -186,14 +186,14 @@ namespace Component {
     // entt::entity handles, enabling flexible and memory-efficient references.
 
     /**
-     * @brief [新] 附加�?Element 实体，指向其关联�?Property（截面）实体
-     * @details 截面参数（积分、沙漏等）由此获取；材料通过 SimdroidPart 绑定�?
-     * �?TopologyData.element_uid_to_part_map 得到 Part 后取 part.material�?
+     * @brief [New] Attached to Element entity, points to its associated Property (section) entity
+     * @details Section parameters (integration, hourglass, etc.) are obtained from here; material is bound through SimdroidPart.
+     * Get Part from TopologyData.element_uid_to_part_map, then get part.material.
      * 
-     * 使用示例（截面）�?
+     * Usage example (section):
      *   auto section_entity = registry.get<Component::PropertyRef>(element_entity).property_entity;
      *   const auto& property = registry.get<Component::SolidProperty>(section_entity);
-     * 使用示例（材料，需 TopologyData �?Part）：
+     * Usage example (material, requires TopologyData and Part):
      *   auto part_entity = topology.element_uid_to_part_map[eid];
      *   entt::entity material_entity = registry.get<Component::SimdroidPart>(part_entity).material;
      */
@@ -207,70 +207,70 @@ namespace Component {
     // Components for explicit time integration solver
 
     /**
-     * @brief 节点速度组件（用于显式动力学�?
-     * @details 附加�?Node 实体，存储节点在三个方向的速度分量
+     * @brief Node velocity component (for explicit dynamics)
+     * @details Attached to Node entity, stores velocity components in three directions
      */
     struct Velocity {
         double vx, vy, vz;
     };
 
     /**
-     * @brief 节点加速度组件（用于显式动力学�?
-     * @details 附加�?Node 实体，存储节点在三个方向的加速度分量
+     * @brief Node acceleration component (for explicit dynamics)
+     * @details Attached to Node entity, stores acceleration components in three directions
      */
     struct Acceleration {
         double ax, ay, az;
     };
 
     /**
-     * @brief [新] 节点基础加速度（重�?地基加速度）组�?
-     * @details �?Component::BaseAccelerationLoad（载荷定义）区分开�?
-     *          该组件用于在求解阶段缓存“已作用到节点上的基础加速度”�?
-     *          解析阶段通常只创�?BaseAccelerationLoad 并通过 AppliedLoadRef 关联到节点�?
+     * @brief [New] Node base acceleration (gravity/base acceleration) component
+     * @details Distinguished from Component::BaseAccelerationLoad (load definition).
+     *          This component is used in the solving phase to cache "base acceleration already applied to nodes".
+     *          Parsing phase usually only creates BaseAccelerationLoad and associates to nodes via AppliedLoadRef.
      */
     struct BaseAcceleration {
         double ax, ay, az;
     };
 
     /**
-     * @brief 节点位移组件（用于显式动力学�?
-     * @details 附加�?Node 实体，存储节点在三个方向的位移分�?
+     * @brief Node displacement component (for explicit dynamics)
+     * @details Attached to Node entity, stores displacement components in three directions
      */
     struct Displacement {
         double dx, dy, dz;
     };
 
     /**
-     * @brief 节点集中质量组件（用于显式动力学)
-     * @details 附加Node 实体，存储节点的集中质量（Lumped Mass)
-     * 通过 MassSystem 从单元质量分配得到
+     * @brief Node lumped mass component (for explicit dynamics)
+     * @details Attached to Node entity, stores the node's lumped mass.
+     * Obtained by MassSystem from element mass distribution
      */
     struct Mass {
         double value;
     };
 
     /**
-     * @brief 节点外力组件（用于显式动力学)
-     * @details 附加Node 实体，存储外部载荷在三个方向的分量
-     * LoadSystem 和 AppliedLoadRef 计算得到
+     * @brief Node external force component (for explicit dynamics)
+     * @details Attached to Node entity, stores external load components in three directions
+     * Calculated by LoadSystem and AppliedLoadRef
      */
     struct ExternalForce {
         double fx, fy, fz;
     };
 
     /**
-     * @brief 节点内力组件（用于显式动力学)
-     * @details 附加Node 实体，存储单元应力产生的内力在三个方向的分量
-     * InternalForceSystem 从单元应力计算得到
+     * @brief Node internal force component (for explicit dynamics)
+     * @details Attached to Node entity, stores internal force components in three directions from element stresses
+     * Calculated by InternalForceSystem from element stresses
      */
     struct InternalForce {
         double fx, fy, fz;
     };
 
     /**
-     * @brief 初始位置组件（用于显式动力学)
-     * @details 附加Node 实体，存储节点的初始位置，用于计算位移增量
-     * 在求解器初始化时复制 Position 得到
+     * @brief Initial position component (for explicit dynamics)
+     * @details Attached to Node entity, stores the node's initial position, used to calculate displacement increments
+     * Copied from Position during solver initialization
      */
     struct InitialPosition {
         double x0, y0, z0;

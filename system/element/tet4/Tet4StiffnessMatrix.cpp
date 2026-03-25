@@ -53,13 +53,13 @@ void compute_tet4_stiffness_matrix(
  }
 
 double compute_tet4_stiffness(const double* coords, const double* D, double* Ke) {
-    // --- 1. 读取 4 个节点坐标（[x0,y0,z0, x1,y1,z1, ...] 展开)---
-    double x0 = coords[0];  double y0 = coords[1];  double z0 = coords[2];   // 节点 1
-    double x1 = coords[3];  double y1 = coords[4];  double z1 = coords[5];   // 节点 2
-    double x2 = coords[6];  double y2 = coords[7];  double z2 = coords[8];   // 节点 3
-    double x3 = coords[9];  double y3 = coords[10]; double z3 = coords[11];  // 节点 4
+    // --- 1. Read coordinates of 4 nodes ([x0,y0,z0, x1,y1,z1, ...] expanded) ---
+    double x0 = coords[0];  double y0 = coords[1];  double z0 = coords[2];   // Node 1
+    double x1 = coords[3];  double y1 = coords[4];  double z1 = coords[5];   // Node 2
+    double x2 = coords[6];  double y2 = coords[7];  double z2 = coords[8];   // Node 3
+    double x3 = coords[9];  double y3 = coords[10]; double z3 = coords[11];  // Node 4
 
-    // --- 2. 6x6 本构矩阵 D 拆成标量（D 按列主序存储，D(i,j) = D[j*6+i])---
+    // --- 2. Decompose 6x6 constitutive matrix D into scalars (D stored in column-major order, D(i,j) = D[j*6+i]) ---
     double D_0_0 = D[0];  double D_0_1 = D[6];  double D_0_2 = D[12]; double D_0_3 = D[18]; double D_0_4 = D[24]; double D_0_5 = D[30];
     double D_1_0 = D[1];  double D_1_1 = D[7];  double D_1_2 = D[13]; double D_1_3 = D[19]; double D_1_4 = D[25]; double D_1_5 = D[31];
     double D_2_0 = D[2];  double D_2_1 = D[8];  double D_2_2 = D[14]; double D_2_3 = D[20]; double D_2_4 = D[26]; double D_2_5 = D[32];
@@ -67,7 +67,7 @@ double compute_tet4_stiffness(const double* coords, const double* D, double* Ke)
     double D_4_0 = D[4];  double D_4_1 = D[10]; double D_4_2 = D[16]; double D_4_3 = D[22]; double D_4_4 = D[28]; double D_4_5 = D[34];
     double D_5_0 = D[5];  double D_5_1 = D[11]; double D_5_2 = D[17]; double D_5_3 = D[23]; double D_5_4 = D[29]; double D_5_5 = D[35];
 
-    // --- 3. 预计算若干与坐标相关的中间量（用于雅可比与形函数梯度)---
+    // --- 3. Precompute intermediate quantities related to coordinates (for Jacobian and shape function gradients) ---
     double x4 = y1*z2;
     double x5 = x0*x4;
     double x6 = y2*z3;

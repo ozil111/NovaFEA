@@ -15,67 +15,67 @@
 
 /**
  * @namespace Component
- * @brief ECS组件 - Property（截�?属性）部分
- * @details Property �?Material 解耦，仅存储截面与积分相关参数（积分方案、沙漏控制等）�?
- * 材料通过 SimdroidPart 绑定，见 simdroid_components.h�?
+ * @brief ECS components - Property (section properties) section
+ * @details Property is decoupled from Material, storing only section and integration related parameters (integration scheme, hourglass control, etc.).
+ * Material is bound through SimdroidPart, see simdroid_components.h.
  */
 namespace Component {
 
     /**
-     * @brief [新] 附加�?Property 实体，存储其用户定义的ID (pid)
-     * @details 用于标识Property实体，避免与其他类型实体的ID冲突
+     * @brief [New] Attached to Property entity, stores its user-defined ID (pid)
+     * @details Used to identify Property entity, avoiding ID conflicts with other types of entities
      */
     struct PropertyID {
         int value;
     };
 
     /**
-     * @brief [新] 附加�?Property 实体，存储固体单元的截面/积分属�?
-     * @details 对应 JSON 中的 "property" 对象，仅存放与截面、积分相关的参数
+     * @brief [New] Attached to Property entity, stores section/integration properties for solid elements
+     * @details Corresponds to "property" object in JSON, stores only parameters related to section and integration
      */
     struct SolidProperty {
-        int type_id;                    // 来自 JSON �?"typeid"
-        int integration_network;        // 积分网络参数，如 "integration_network": 2
-        std::string hourglass_control;  // 沙漏控制方法，如 "hourglass_control": "eas"
+        int type_id;                    // From JSON "typeid"
+        int integration_network;        // Integration network parameter, e.g. "integration_network": 2
+        std::string hourglass_control;  // Hourglass control method, e.g. "hourglass_control": "eas"
     };
 
     // ------------------------------------------------------------------
-    //  通用小组件（可被多种 Property 复用�?
+    //  Common small components (reusable by multiple Property types)
     // ------------------------------------------------------------------
 
-    // 单元算法/配方（例�?"Shell4", "Hex8R" 等）
+    // Element formulation/recipe (e.g. "Shell4", "Hex8R", etc.)
     struct Formulation {
         std::string value;
     };
 
-    // 小应变选项 ("Auto", "T0", "Tnone" �?
+    // Small strain options ("Auto", "T0", "Tnone", etc.)
     struct SmallStrain {
         std::string value;
     };
 
-    // 体积/沙漏粘性参�?(qa, qb)
+    // Bulk/hourglass viscosity parameters (qa, qb)
     struct ViscosityParams {
         double quadratic = 0.1; // qa
         double linear    = 0.05; // qb
     };
 
-    // 通用局部坐标系标记
+    // General local coordinate system marker
     struct CoordSys {
         std::string value;
     };
 
     // ------------------------------------------------------------------
-    //  典型截面属性组件（映射�?Simdroid CrossSection / Radioss PROP�?
+    //  Typical section property components (mapped to Simdroid CrossSection / Radioss PROP)
     // ------------------------------------------------------------------
 
-    // Type == Truss (桁架)
+    // Type == Truss (truss)
     struct TrussProperty {
         double area = 0.0; // Area
     };
 
     // Type == Shell / SandwichShell
     struct ShellProperty {
-        int   type_id = 0;                         // 备用：Shell / Sandwich / Sh3n ...
+        int   type_id = 0;                         // Spare: Shell / Sandwich / Sh3n ...
         std::array<double, 4> thickness{};        // Thick[4]
         bool  thickness_change = false;           // Ithick
         bool  drill_dof        = false;           // Idrill
@@ -88,9 +88,9 @@ namespace Component {
         std::string mid_shell_flag;               // "NoOffset"/"Upper"/"Lower"
     };
 
-    // Type == Solid / SolidOrthotropic（在原有 SolidProperty 基础上做轻量扩展�?
+    // Type == Solid / SolidOrthotropic (lightweight extension based on original SolidProperty)
     struct SolidAdvancedProperty {
-        // 直接复用/补充 SolidProperty 的高阶选项，保持解耦：
+        // Directly reuse/supplement SolidProperty's advanced options, maintaining decoupling:
         std::string formulation;      // Hex8R / Tet4Q / ...
         std::string small_strain;     // Ismstr
         std::string const_pressure;   // Icpre
@@ -118,7 +118,7 @@ namespace Component {
         std::array<double, 3> distortion_coeffs{}; // DistortionControlCoeffs
     };
 
-    // Type == SolidShComp (复合 SolidShell, PROP TYPE22)
+    // Type == SolidShComp (composite SolidShell, PROP TYPE22)
     struct SolidShCompProperty {
         Formulation formulation;              // TShell / TShellRPH
         SmallStrain small_strain;            // Ismstr
@@ -128,7 +128,7 @@ namespace Component {
         double thickness_penalty = 10.0;     // ThicknessPenaltyFactor
         CoordSys coord_sys;                  // skew_ID
 
-        // 复合层数�?
+        // Composite layer data
         std::vector<double> layer_angles;    // Angles[]
         std::vector<double> layer_thicks;    // Thicks[]
         std::vector<double> layer_positions; // Positions[]
@@ -154,7 +154,7 @@ namespace Component {
         std::vector<double> yi;          // Yi[]
         std::vector<double> zi;          // Zi[]
         std::vector<double> areai;       // Areai[]
-        std::vector<double> dj;          // Dj[...] 截面尺寸 D*
+        std::vector<double> dj;          // Dj[...] section dimensions D*
     };
 
     // Type == Cohesive (TYPE43)
@@ -173,7 +173,7 @@ namespace Component {
         bool nonlinear_damper = false;   // NonlinearDamper
         std::string hardening_flag;      // HardeningFlag
 
-        // 曲线引用（通过 DofMap �?curve_name_to_entity 解析�?
+        // Curve references (resolved via DofMap's curve_name_to_entity)
         entt::entity stiffness_curve = entt::null; // Load_DeflectionCurve
         entt::entity damping_curve   = entt::null; // DampingCurve
     };
@@ -196,7 +196,7 @@ namespace Component {
 
         std::array<std::string, 6> hardening_flag{}; // HardenFlag[6]
 
-        // 6 向曲线引�?
+        // 6-direction curve references
         std::array<entt::entity, 6> nonlinear_stiffness{};      // f(δ)
         std::array<entt::entity, 6> for_or_mom_with_vel{};      // g(δ)
         std::array<entt::entity, 6> harden_related_curve{};     // according to HardenFlag
@@ -208,7 +208,7 @@ namespace Component {
         std::array<double, 6> absc_scale_damp{};     // F
         std::array<double, 6> ordina_scale_damp{};   // H
         std::array<double, 6> absc_scale_stiff{};    // Ascale
-        std::array<double, 6> ordina_scale_stiff{};  // （无名系数）
+        std::array<double, 6> ordina_scale_stiff{};  // (unnamed coefficient)
 
         double ref_tran_vel = 0.0; // RefTranVel
         double ref_rot_vel  = 0.0; // RefRotVel
