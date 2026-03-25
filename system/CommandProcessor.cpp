@@ -510,10 +510,6 @@ void process_command(const std::string& command_line, AppSession& session) {
     // Basic node / element operations
     // =======================================================
     else if (command == "node_add") {
-        if (!session.mesh_loaded) {
-            spdlog::error("No mesh loaded. Please 'import' or 'import_simdroid' first.");
-            return;
-        }
         int nid;
         double x, y, z;
         if (!(ss >> nid >> x >> y >> z)) {
@@ -530,14 +526,11 @@ void process_command(const std::string& command_line, AppSession& session) {
         registry.emplace<Component::NodeID>(e, nid);
         registry.emplace<Component::OriginalID>(e, nid);
         spdlog::info("Node {} created at ({}, {}, {}).", nid, x, y, z);
+        session.mesh_loaded = true;
         invalidate_topology_if_needed(session);
         rebuild_inspector_if_mesh_loaded(session);
     }
     else if (command == "node_move") {
-        if (!session.mesh_loaded) {
-            spdlog::error("No mesh loaded. Please 'import' or 'import_simdroid' first.");
-            return;
-        }
         int nid;
         double x, y, z;
         if (!(ss >> nid >> x >> y >> z)) {
@@ -555,13 +548,10 @@ void process_command(const std::string& command_line, AppSession& session) {
         pos.y = y;
         pos.z = z;
         spdlog::info("Node {} moved to ({}, {}, {}).", nid, x, y, z);
+        session.mesh_loaded = true;
         // Topology unchanged (coordinates only); no topology / inspector rebuild needed
     }
     else if (command == "node_delete") {
-        if (!session.mesh_loaded) {
-            spdlog::error("No mesh loaded. Please 'import' or 'import_simdroid' first.");
-            return;
-        }
         int nid;
         if (!(ss >> nid)) {
             spdlog::error("Usage: node_delete <nid>");
@@ -585,14 +575,11 @@ void process_command(const std::string& command_line, AppSession& session) {
         }
         registry.destroy(node_e);
         spdlog::info("Node {} deleted.", nid);
+        session.mesh_loaded = true;
         invalidate_topology_if_needed(session);
         rebuild_inspector_if_mesh_loaded(session);
     }
     else if (command == "elem_add") {
-        if (!session.mesh_loaded) {
-            spdlog::error("No mesh loaded. Please 'import' or 'import_simdroid' first.");
-            return;
-        }
         int eid;
         if (!(ss >> eid)) {
             spdlog::error("Usage: elem_add <eid> <nid1> <nid2> ...");
@@ -633,14 +620,11 @@ void process_command(const std::string& command_line, AppSession& session) {
         auto& conn = registry.emplace<Component::Connectivity>(e);
         conn.nodes = std::move(node_entities);
         spdlog::info("Element {} created with {} nodes (type_id={}).", eid, conn.nodes.size(), type_id);
+        session.mesh_loaded = true;
         invalidate_topology_if_needed(session);
         rebuild_inspector_if_mesh_loaded(session);
     }
     else if (command == "elem_delete") {
-        if (!session.mesh_loaded) {
-            spdlog::error("No mesh loaded. Please 'import' or 'import_simdroid' first.");
-            return;
-        }
         int eid;
         if (!(ss >> eid)) {
             spdlog::error("Usage: elem_delete <eid>");
@@ -693,6 +677,7 @@ void process_command(const std::string& command_line, AppSession& session) {
         }
         registry.destroy(elem_e);
         spdlog::info("Element {} deleted.", eid);
+        session.mesh_loaded = true;
         invalidate_topology_if_needed(session);
         rebuild_inspector_if_mesh_loaded(session);
     }
@@ -787,10 +772,6 @@ void process_command(const std::string& command_line, AppSession& session) {
         }
     }
     else if (command == "set_addnode") {
-        if (!session.mesh_loaded) {
-            spdlog::error("No mesh loaded. Please 'import' or 'import_simdroid' first.");
-            return;
-        }
         std::string set_name;
         ss >> set_name;
         if (set_name.empty()) {
@@ -823,10 +804,6 @@ void process_command(const std::string& command_line, AppSession& session) {
         spdlog::info("set_addnode '{}' : added {} nodes.", set_name, added);
     }
     else if (command == "set_addelem") {
-        if (!session.mesh_loaded) {
-            spdlog::error("No mesh loaded. Please 'import' or 'import_simdroid' first.");
-            return;
-        }
         std::string set_name;
         ss >> set_name;
         if (set_name.empty()) {
@@ -859,10 +836,6 @@ void process_command(const std::string& command_line, AppSession& session) {
         spdlog::info("set_addelem '{}' : added {} elements.", set_name, added);
     }
     else if (command == "set_removenode") {
-        if (!session.mesh_loaded) {
-            spdlog::error("No mesh loaded. Please 'import' or 'import_simdroid' first.");
-            return;
-        }
         std::string set_name;
         ss >> set_name;
         if (set_name.empty()) {
@@ -897,10 +870,6 @@ void process_command(const std::string& command_line, AppSession& session) {
         spdlog::info("set_removenode '{}' : removed {} entries.", set_name, removed);
     }
     else if (command == "set_removeelem") {
-        if (!session.mesh_loaded) {
-            spdlog::error("No mesh loaded. Please 'import' or 'import_simdroid' first.");
-            return;
-        }
         std::string set_name;
         ss >> set_name;
         if (set_name.empty()) {
