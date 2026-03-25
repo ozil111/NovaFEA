@@ -15,46 +15,60 @@
 
 /**
  * @class JsonParser
- * @brief JSON 格式�?FEM 输入文件解析�?
- * @details 采用 N-Step 解析策略，严格按照实体依赖顺序解析：
+ * @brief JSON format FEM input file parser
+ * @details Uses N-Step parsing strategy, strictly parsing according to entity dependency order:
  * 
- * 解析顺序（关键！）：
- *   1. Material  (无依�?
- *   2. Property  (依赖 Material)
- *   3. Node      (无依�?
- *   4. Element   (依赖 Node, Property)
- *   5. NodeSet   (依赖 Node)
- *   6. EleSet    (依赖 Element)
- *   7. Load      (无依赖，但需要在 NodeSet 之后)
- *   8. Boundary  (无依赖，但需要在 NodeSet 之后)
- *   9. Apply Load/Boundary (依赖 Load, Boundary, NodeSet)
+ * Parsing order (critical!):
+ *   1. Material  (no dependencies)
+ *   2. Property  (depends on Material)
+ *   3. Node      (no dependencies)
+ *   4. Element   (depends on Node, Property)
+ *   5. NodeSet   (depends on Node)
+ *   6. EleSet    (depends on Element)
+ *   7. Load      (no dependencies, but needs to be after NodeSet)
+ *   8. Boundary  (no dependencies, but needs to be after NodeSet)
+ *   9. Apply Load/Boundary (depends on Load, Boundary, NodeSet)
  * 
- * 架构特点�?
- *   - 使用 nlohmann::json 库解�?
- *   - 采用 Plan B 引用模式：实体间通过 entt::entity 句柄关联
- *   - 通过多个 std::unordered_map<int, entt::entity> 暂存用户ID到实体的映射
- *   - 每个解析步骤独立封装为私有方法，易于维护和测�?
+ * Architecture features:
+ *   - Uses nlohmann::json library for parsing
+ *   - Uses Plan B reference mode: entities are associated via entt::entity handles
+ *   - Temporarily stores user ID to entity mappings through multiple std::unordered_map<int, entt::entity>
+ *   - Each parsing step is independently encapsulated as a private method, easy to maintain and test
  */
 class JsonParser {
 public:
     /**
-     * @brief 解析 JSON 格式的输入文件并填充 DataContext
-     * @param filepath JSON 文件路径（推荐扩展名�?jsonc 支持注释�?
-     * @param data_context [out] 将被填充�?DataContext 对象
-     * @return true 如果解析成功，false 如果文件无法打开或发生错�?
+     * @brief Parse JSON format input file and populate DataContext
+     * @param filepath JSON file path (recommended extension .jsonc supports comments)
+     * @param data_context [out] DataContext object to be populated
+     * @return true if parsing succeeds, false if file cannot be opened or error occurs
      */
     static bool parse(const std::string& filepath, DataContext& data_context);
 
+    /**
+     * @brief Merge JSON fragment into an existing DataContext (does not clear the registry).
+     * @details Reuses the same top-level keys and per-entity schema as full-file import (@ref parse).
+     *          ID maps are seeded from entities already in the registry so new entries can reference
+     *          existing materials, nodesets, curves, etc. Duplicate numeric IDs in the fragment are
+     *          skipped with the same warnings as in parse().
+     * @param filepath Path to .json / .jsonc (comments allowed).
+     * @param data_context Existing model to extend.
+     * @return true on success.
+     */
+    static bool apply_fragment(const std::string& filepath, DataContext& data_context);
+
 private:
+    static bool run_parse_pipeline(const nlohmann::json& j, DataContext& data_context, bool replace_context);
+
     // ====================================================================
-    // N-Step 解析方法（按依赖顺序调用�?
+    // N-Step 解析方法（按依赖顺序调用�?
     // ====================================================================
 
     /**
-     * @brief 步骤 1: 解析 Material 实体
-     * @param j JSON 根对�?
+     * @brief Step 1: Parse Material entities
+     * @param j JSON root object
      * @param registry EnTT registry
-     * @param material_id_map [out] mid -> entity 映射�?
+     * @param material_id_map [out] mid -> entity mapping
      */
     static void parse_materials(
         const nlohmann::json& j,
@@ -63,12 +77,12 @@ private:
     );
 
     /**
-     * @brief 步骤 2: 解析 Property 实体
-     * @param j JSON 根对�?
+     * @brief Step 2: Parse Property entities
+     * @param j JSON root object
      * @param registry EnTT registry
-     * @param material_id_map [in] mid -> entity 映射�?
-     * @param property_id_map [out] pid -> entity 映射�?
-     * @param property_id_to_material [out] pid -> material entity，供 build_parts_from_properties 使用
+     * @param material_id_map [in] mid -> entity mapping
+     * @param property_id_map [out] pid -> entity mapping
+     * @param property_id_to_material [out] pid -> material entity, for use by build_parts_from_properties
      */
     static void parse_properties(
         const nlohmann::json& j,
@@ -79,7 +93,7 @@ private:
     );
 
     /**
-     * @brief 步骤 4.5: �?Property 构建 SimdroidPart 与单元集，材料通过 Part 绑定
+     * @brief Step 4.5: Build SimdroidPart and element sets from Property, materials bound through Part
      */
     static void build_parts_from_properties(
         entt::registry& registry,
@@ -89,10 +103,10 @@ private:
     );
 
     /**
-     * @brief 步骤 3: 解析 Node 实体
-     * @param j JSON 根对�?
+     * @brief Step 3: Parse Node entities
+     * @param j JSON root object
      * @param registry EnTT registry
-     * @param node_id_map [out] nid -> entity 映射�?
+     * @param node_id_map [out] nid -> entity mapping
      */
     static void parse_nodes(
         const nlohmann::json& j,
@@ -101,12 +115,12 @@ private:
     );
 
     /**
-     * @brief 步骤 4: 解析 Element 实体
-     * @param j JSON 根对�?
+     * @brief Step 4: Parse Element entities
+     * @param j JSON root object
      * @param registry EnTT registry
-     * @param node_id_map [in] nid -> entity 映射�?
-     * @param property_id_map [in] pid -> entity 映射�?
-     * @param element_id_map [out] eid -> entity 映射�?
+     * @param node_id_map [in] nid -> entity mapping
+     * @param property_id_map [in] pid -> entity mapping
+     * @param element_id_map [out] eid -> entity mapping
      */
     static void parse_elements(
         const nlohmann::json& j,
@@ -117,11 +131,11 @@ private:
     );
 
     /**
-     * @brief 步骤 5: 解析 NodeSet 实体
-     * @param j JSON 根对�?
+     * @brief Step 5: Parse NodeSet entities
+     * @param j JSON root object
      * @param registry EnTT registry
-     * @param node_id_map [in] nid -> entity 映射�?
-     * @param nodeset_id_map [out] nsid -> entity 映射�?
+     * @param node_id_map [in] nid -> entity mapping
+     * @param nodeset_id_map [out] nsid -> entity mapping
      */
     static void parse_nodesets(
         const nlohmann::json& j,
@@ -131,11 +145,11 @@ private:
     );
 
     /**
-     * @brief 步骤 6: 解析 EleSet 实体
-     * @param j JSON 根对�?
+     * @brief Step 6: Parse EleSet entities
+     * @param j JSON root object
      * @param registry EnTT registry
-     * @param element_id_map [in] eid -> entity 映射�?
-     * @param eleset_id_map [out] esid -> entity 映射�?
+     * @param element_id_map [in] eid -> entity mapping
+     * @param eleset_id_map [out] esid -> entity mapping
      */
     static void parse_elesets(
         const nlohmann::json& j,
@@ -145,10 +159,10 @@ private:
     );
 
     /**
-     * @brief 步骤 6.5: 解析 Curve 实体（曲线定义）
-     * @param j JSON 根对�?
+     * @brief Step 6.5: Parse Curve entities (curve definitions)
+     * @param j JSON root object
      * @param registry EnTT registry
-     * @param curve_id_map [out] cid -> entity 映射�?
+     * @param curve_id_map [out] cid -> entity mapping
      */
     static void parse_curves(
         const nlohmann::json& j,
@@ -157,11 +171,11 @@ private:
     );
 
     /**
-     * @brief 步骤 7: 解析 Load 实体（抽象定义）
-     * @param j JSON 根对�?
+     * @brief Step 7: Parse Load entities (abstract definitions)
+     * @param j JSON root object
      * @param registry EnTT registry
-     * @param load_id_map [out] lid -> entity 映射�?
-     * @param curve_id_map [inout] cid -> entity 映射表（可能被修改以添加默认curve�?
+     * @param load_id_map [out] lid -> entity mapping
+     * @param curve_id_map [inout] cid -> entity mapping table (may be modified to add default curve)
      */
     static void parse_loads(
         const nlohmann::json& j,
@@ -171,10 +185,10 @@ private:
     );
 
     /**
-     * @brief 步骤 8: 解析 Boundary 实体（抽象定义）
-     * @param j JSON 根对�?
+     * @brief Step 8: Parse Boundary entities (abstract definitions)
+     * @param j JSON root object
      * @param registry EnTT registry
-     * @param boundary_id_map [out] bid -> entity 映射�?
+     * @param boundary_id_map [out] bid -> entity mapping
      */
     static void parse_boundaries(
         const nlohmann::json& j,
@@ -183,11 +197,11 @@ private:
     );
 
     /**
-     * @brief 步骤 9: "应用" Load �?Node（建立引用关系）
-     * @param j JSON 根对�?
+     * @brief Step 9: "Apply" Load to Node (establish reference relationships)
+     * @param j JSON root object
      * @param registry EnTT registry
-     * @param load_id_map [in] lid -> entity 映射�?
-     * @param nodeset_id_map [in] nsid -> entity 映射�?
+     * @param load_id_map [in] lid -> entity mapping
+     * @param nodeset_id_map [in] nsid -> entity mapping
      */
     static void apply_loads(
         const nlohmann::json& j,
@@ -197,11 +211,11 @@ private:
     );
 
     /**
-     * @brief 步骤 10: "应用" Boundary �?Node（建立引用关系）
-     * @param j JSON 根对�?
+     * @brief Step 10: "Apply" Boundary to Node (establish reference relationships)
+     * @param j JSON root object
      * @param registry EnTT registry
-     * @param boundary_id_map [in] bid -> entity 映射�?
-     * @param nodeset_id_map [in] nsid -> entity 映射�?
+     * @param boundary_id_map [in] bid -> entity mapping
+     * @param nodeset_id_map [in] nsid -> entity mapping
      */
     static void apply_boundaries(
         const nlohmann::json& j,
@@ -211,10 +225,10 @@ private:
     );
 
     /**
-     * @brief 步骤 11: 解析 Analysis 实体
-     * @param j JSON 根对�?
+     * @brief Step 11: Parse Analysis entities
+     * @param j JSON root object
      * @param registry EnTT registry
-     * @param analysis_id_map [out] aid -> entity 映射�?
+     * @param analysis_id_map [out] aid -> entity mapping
      */
     static void parse_analysis(
         const nlohmann::json& j,
@@ -223,10 +237,10 @@ private:
     );
 
     /**
-     * @brief 步骤 12: 解析 Output 实体（当前仅支持全局唯一一�?output，无需 oid�?
-     * @param j JSON 根对象，j["output"] 为单个对象，�?{"node_output":["displacement"],"interval_time":0.01}
+     * @brief Step 12: Parse Output entities (currently only supports a single global output, no oid needed)
+     * @param j JSON root object, j["output"] is a single object, e.g. {"node_output":["displacement"],"interval_time":0.01}
      * @param registry EnTT registry
-     * @param output_id_map [out] 唯一输出�?entity 存于 output_id_map[0]
+     * @param output_id_map [out] unique output entity stored in output_id_map[0]
      */
     static void parse_output(
         const nlohmann::json& j,
