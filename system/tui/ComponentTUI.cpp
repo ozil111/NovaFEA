@@ -779,8 +779,6 @@ void run_app_tui(AppSession& session) {
     std::vector<std::string> history;
     int history_index = -1;
     std::string input_backup;
-    // top_view: if set, overrides status line view (e.g. panel/list render).
-    std::optional<Element> top_view;
     float left_focus = 0.0f;
     float right_focus = 0.0f;
     FocusRegion focus_region = FocusRegion::BottomCommand;
@@ -801,7 +799,61 @@ void run_app_tui(AppSession& session) {
     std::vector<ElemListRow> elem_rows;
     int elem_selected_row = -1;
 
-    auto open_panel_in_top_view = [&](const std::string& type, const std::string& id_or_name) -> bool {
+    // top_panel: interactive component shown in the left-top view.
+    std::optional<ftxui::Component> top_panel;
+
+    struct ViewState {
+        LeftViewMode mode = LeftViewMode::None;
+        std::string entity_type;
+        std::string entity_id;
+        int node_idx = -1;
+        int elem_idx = -1;
+        float left_focus = 0.0f;
+        FocusRegion focus_region = FocusRegion::BottomCommand;
+        std::string label;
+    };
+
+    std::vector<ViewState> view_history;
+    constexpr std::size_t kMaxViewHistoryDepth = 20;
+
+    std::string current_panel_type;
+    std::string current_panel_id;
+
+    auto save_view_state = [&](std::string label) {
+        if (view_history.size() >= kMaxViewHistoryDepth) {
+            view_history.erase(view_history.begin());
+        }
+        ViewState st;
+        st.mode = left_view_mode;
+        st.node_idx = node_selected_row;
+        st.elem_idx = elem_selected_row;
+        st.left_focus = left_focus;
+        st.focus_region = focus_region;
+        if (left_view_mode == LeftViewMode::StaticElement) {
+            st.entity_type = current_panel_type;
+            st.entity_id = current_panel_id;
+        }
+        st.label = std::move(label);
+        view_history.push_back(std::move(st));
+    };
+
+    auto clear_left_view = [&]() {
+        top_panel.reset();
+        left_view_mode = LeftViewMode::None;
+        node_rows.clear();
+        node_selected_row = -1;
+        elem_rows.clear();
+        elem_selected_row = -1;
+        left_focus = 0.0f;
+        current_panel_type.clear();
+        current_panel_id.clear();
+    };
+
+    std::function<bool(const std::string&, const std::string&, bool)> open_panel_in_top_view;
+    open_panel_in_top_view = [&](const std::string& type, const std::string& id_or_name, bool push_history) -> bool {
+        if (push_history) {
+            save_view_state("panel " + type + " " + id_or_name);
+        }
         PanelEntityKind kind = PanelEntityKind::Unknown;
         std::string display_id;
         entt::entity e = resolve_panel_entity(
@@ -812,40 +864,91 @@ void run_app_tui(AppSession& session) {
         }
 
         // Build the same document structure as render_panel(), but keep it inside the TUI top area.
-        const char* kind_str = "Entity";
+        const char* kind_str_c = "Entity";
         switch (kind) {
-            case PanelEntityKind::Node:    kind_str = "Node";    break;
-            case PanelEntityKind::Element: kind_str = "Element"; break;
-            case PanelEntityKind::Part:    kind_str = "Part";    break;
-            case PanelEntityKind::Set:     kind_str = "Set";     break;
+            case PanelEntityKind::Node:    kind_str_c = "Node";    break;
+            case PanelEntityKind::Element: kind_str_c = "Element"; break;
+            case PanelEntityKind::Part:    kind_str_c = "Part";    break;
+            case PanelEntityKind::Set:     kind_str_c = "Set";     break;
             default: break;
         }
+        const std::string kind_str = kind_str_c;
 
-        Elements component_views;
-        for (const auto& entry : ComponentTUIRegistry::instance().entries()) {
-            if (entry.has_component(session.data.registry, e)) {
-                component_views.push_back(
-                    window(text(entry.display_name) | bold, entry.render(session.data.registry, e, &session.inspector)));
+        std::vector<ftxui::Component> link_buttons;
+
+        if (kind == PanelEntityKind::Node && session.inspector.is_built && session.data.registry.all_of<::Component::NodeID>(e)) {
+            const int nid = session.data.registry.get<::Component::NodeID>(e).value;
+            auto it = session.inspector.nid_to_elems.find(nid);
+            if (it != session.inspector.nid_to_elems.end()) {
+                const auto& elem_ids = it->second;
+                const std::size_t show = (std::min<std::size_t>)(elem_ids.size(), 40);
+                for (std::size_t i = 0; i < show; ++i) {
+                    const int eid = elem_ids[i];
+                    link_buttons.push_back(Button(std::to_string(eid), [&, eid]() {
+                        (void)open_panel_in_top_view("elem", std::to_string(eid), true);
+                    }));
+                }
             }
         }
-        if (kind == PanelEntityKind::Node) {
-            component_views.push_back(window(text("Force path") | bold,
-                force_path_element(session.data.registry, e, &session.inspector)));
+
+        if (kind == PanelEntityKind::Element && session.inspector.is_built && session.data.registry.all_of<::Component::Connectivity>(e)) {
+            const auto& c = session.data.registry.get<::Component::Connectivity>(e);
+            std::vector<int> nids;
+            nids.reserve(c.nodes.size());
+            for (auto ne : c.nodes) {
+                if (!session.data.registry.valid(ne) || !session.data.registry.all_of<::Component::NodeID>(ne)) continue;
+                nids.push_back(session.data.registry.get<::Component::NodeID>(ne).value);
+            }
+            const std::size_t show = (std::min<std::size_t>)(nids.size(), 40);
+            for (std::size_t i = 0; i < show; ++i) {
+                const int nid = nids[i];
+                link_buttons.push_back(Button(std::to_string(nid), [&, nid]() {
+                    (void)open_panel_in_top_view("node", std::to_string(nid), true);
+                }));
+            }
         }
 
-        top_view = vbox({
-            hbox({
-                text(" NovaFEA ") | bgcolor(Color::Blue) | color(Color::White) | bold,
-                text(" Universal Inspector ") | color(Color::Cyan),
-                filler(),
-                text(std::string(kind_str) + " " + display_id) | dim,
-            }) | border,
-            vbox(std::move(component_views)),
-            text("Tip: type another command below. Use 'help' for quick help.") | dim,
+        const bool has_links = !link_buttons.empty();
+        ftxui::Component links =
+            has_links ? Container::Vertical(std::move(link_buttons)) : Container::Vertical({});
+
+        ftxui::Component panel_root = links;
+        top_panel = Renderer(panel_root, [&, e, kind, kind_str, display_id, links, has_links] {
+            Elements component_views;
+            for (const auto& entry : ComponentTUIRegistry::instance().entries()) {
+                if (entry.has_component(session.data.registry, e)) {
+                    component_views.push_back(
+                        window(text(entry.display_name) | bold, entry.render(session.data.registry, e, &session.inspector)));
+                }
+            }
+            if (kind == PanelEntityKind::Node) {
+                component_views.push_back(window(text("Force path") | bold,
+                    force_path_element(session.data.registry, e, &session.inspector)));
+            }
+
+            Elements body;
+            body.push_back(
+                hbox({
+                    text(" NovaFEA ") | bgcolor(Color::Blue) | color(Color::White) | bold,
+                    text(" Universal Inspector ") | color(Color::Cyan),
+                    filler(),
+                    text(std::string(kind_str) + " " + display_id) | dim,
+                }) | border);
+            body.push_back(vbox(component_views));
+            if (has_links) {
+                const std::string title =
+                    (kind == PanelEntityKind::Node) ? "Elements (jump)" :
+                    (kind == PanelEntityKind::Element) ? "Contains Nodes (jump)" : "Related (jump)";
+                body.push_back(window(text(title) | bold, links->Render() | flex));
+            }
+            body.push_back(text("Tip: type another command below. Use 'help' for quick help.") | dim);
+            return vbox(std::move(body));
         });
         left_view_mode = LeftViewMode::StaticElement;
         left_focus = 0.0f;
         focus_region = FocusRegion::TopLeftView;
+        current_panel_type = type;
+        current_panel_id = id_or_name;
         return true;
     };
 
@@ -867,6 +970,91 @@ void run_app_tui(AppSession& session) {
         left_focus = clamp01(
             static_cast<float>(elem_selected_row + 1) /
             static_cast<float>(elem_rows.size() + 1));
+    };
+
+    auto build_nodes_list_view = [&]() {
+        auto& reg = session.data.registry;
+        auto view = reg.view<const ::Component::NodeID, const ::Component::Position>();
+        node_rows.clear();
+        node_rows.reserve(view.size_hint());
+        for (auto e : view) {
+            const auto& id = view.get<const ::Component::NodeID>(e);
+            const auto& p = view.get<const ::Component::Position>(e);
+            node_rows.push_back(NodeListRow{ id.value, p.x, p.y, p.z });
+        }
+        std::sort(node_rows.begin(), node_rows.end(), [](const NodeListRow& a, const NodeListRow& b) { return a.nid < b.nid; });
+        left_view_mode = LeftViewMode::NodesList;
+        top_panel.reset();
+        current_panel_type.clear();
+        current_panel_id.clear();
+        focus_region = FocusRegion::TopLeftView;
+    };
+
+    auto build_elements_list_view = [&]() {
+        auto& reg = session.data.registry;
+        auto view = reg.view<const ::Component::ElementID, const ::Component::ElementType, const ::Component::Connectivity>();
+        elem_rows.clear();
+        elem_rows.reserve(view.size_hint());
+        for (auto e : view) {
+            const int eid = view.get<const ::Component::ElementID>(e).value;
+            const int type_id = view.get<const ::Component::ElementType>(e).type_id;
+            const auto& conn = view.get<const ::Component::Connectivity>(e);
+            std::vector<int> nids;
+            nids.reserve(conn.nodes.size());
+            for (auto ne : conn.nodes) {
+                if (!reg.valid(ne) || !reg.all_of<::Component::NodeID>(ne)) continue;
+                nids.push_back(reg.get<::Component::NodeID>(ne).value);
+            }
+            std::string nodes_str;
+            const std::size_t show_n = (std::min<std::size_t>)(nids.size(), 8);
+            for (std::size_t i = 0; i < show_n; ++i) {
+                if (i > 0) nodes_str += ", ";
+                nodes_str += std::to_string(nids[i]);
+            }
+            if (nids.size() > show_n) nodes_str += " ...";
+            elem_rows.push_back(ElemListRow{ eid, type_id, std::move(nodes_str) });
+        }
+        std::sort(elem_rows.begin(), elem_rows.end(), [](const ElemListRow& a, const ElemListRow& b) { return a.eid < b.eid; });
+        left_view_mode = LeftViewMode::ElementsList;
+        top_panel.reset();
+        current_panel_type.clear();
+        current_panel_id.clear();
+        focus_region = FocusRegion::TopLeftView;
+    };
+
+    auto restore_view_state = [&]() -> bool {
+        if (view_history.empty())
+            return false;
+        ViewState st = std::move(view_history.back());
+        view_history.pop_back();
+
+        if (st.mode == LeftViewMode::NodesList) {
+            build_nodes_list_view();
+            if (!node_rows.empty()) {
+                const int max_idx = static_cast<int>(node_rows.size()) - 1;
+                node_selected_row = (std::max)(0, (std::min)(max_idx, st.node_idx));
+            } else {
+                node_selected_row = -1;
+            }
+            sync_nodes_focus();
+        } else if (st.mode == LeftViewMode::ElementsList) {
+            build_elements_list_view();
+            if (!elem_rows.empty()) {
+                const int max_idx = static_cast<int>(elem_rows.size()) - 1;
+                elem_selected_row = (std::max)(0, (std::min)(max_idx, st.elem_idx));
+            } else {
+                elem_selected_row = -1;
+            }
+            sync_elems_focus();
+        } else if (st.mode == LeftViewMode::StaticElement && !st.entity_type.empty() && !st.entity_id.empty()) {
+            (void)open_panel_in_top_view(st.entity_type, st.entity_id, false);
+        } else {
+            clear_left_view();
+        }
+
+        left_focus = st.left_focus;
+        focus_region = st.focus_region;
+        return true;
     };
 
     auto render_elements_list_element = [&]() -> Element {
@@ -956,8 +1144,8 @@ void run_app_tui(AppSession& session) {
             top_left = render_nodes_list_element();
         } else if (left_view_mode == LeftViewMode::ElementsList) {
             top_left = render_elements_list_element();
-        } else if (top_view.has_value()) {
-            top_left = top_view.value();
+        } else if (top_panel.has_value()) {
+            top_left = top_panel.value()->Render();
         } else {
             top_left = text("No active TUI view. Try: list_nodes, list_elements, panel ...") | dim;
         }
@@ -1011,6 +1199,13 @@ void run_app_tui(AppSession& session) {
             return true;
         }
 
+        if (focus_region == FocusRegion::TopLeftView &&
+            left_view_mode == LeftViewMode::StaticElement &&
+            top_panel.has_value()) {
+            if (top_panel.value()->OnEvent(event))
+                return true;
+        }
+
         if (focus_region == FocusRegion::BottomCommand) {
             const int history_size = static_cast<int>(history.size());
             if (event == Event::ArrowUp) {
@@ -1046,10 +1241,14 @@ void run_app_tui(AppSession& session) {
             if (focus_region == FocusRegion::TopLeftView) {
                 if (left_view_mode == LeftViewMode::NodesList && !node_rows.empty() &&
                     node_selected_row >= 0 && node_selected_row < static_cast<int>(node_rows.size())) {
-                    (void)open_panel_in_top_view("node", std::to_string(node_rows[static_cast<std::size_t>(node_selected_row)].nid));
+                    save_view_state("list_nodes");
+                    (void)open_panel_in_top_view("node",
+                        std::to_string(node_rows[static_cast<std::size_t>(node_selected_row)].nid), false);
                 } else if (left_view_mode == LeftViewMode::ElementsList && !elem_rows.empty() &&
                     elem_selected_row >= 0 && elem_selected_row < static_cast<int>(elem_rows.size())) {
-                    (void)open_panel_in_top_view("elem", std::to_string(elem_rows[static_cast<std::size_t>(elem_selected_row)].eid));
+                    save_view_state("list_elements");
+                    (void)open_panel_in_top_view("elem",
+                        std::to_string(elem_rows[static_cast<std::size_t>(elem_selected_row)].eid), false);
                 }
                 return true;
             }
@@ -1068,12 +1267,7 @@ void run_app_tui(AppSession& session) {
             if (cmd.empty()) return true;
 
             // Clear the view when a normal command is entered; view commands will set it again.
-            top_view.reset();
-            left_view_mode = LeftViewMode::None;
-            node_rows.clear();
-            node_selected_row = -1;
-            elem_rows.clear();
-            elem_selected_row = -1;
+            clear_left_view();
 
             if (cmd == "quit" || cmd == "exit") {
                 session.is_running = false;
@@ -1097,7 +1291,8 @@ void run_app_tui(AppSession& session) {
                     "",
                     "Note: other commands are supported; they will execute and log to the normal logger.",
                 };
-                top_view = window(text(" Help ") | bold, status_lines_element(help));
+                ftxui::Component dummy = Container::Vertical({});
+                top_panel = Renderer(dummy, [help = std::move(help)]() { return window(text(" Help ") | bold, status_lines_element(help)); });
                 left_view_mode = LeftViewMode::StaticElement;
                 left_focus = 0.0f;
                 focus_region = FocusRegion::TopLeftView;
@@ -1106,50 +1301,18 @@ void run_app_tui(AppSession& session) {
 
             // list_*: render into top.
             if (cmd == "list_nodes") {
-                auto& reg = session.data.registry;
-                auto view = reg.view<const ::Component::NodeID, const ::Component::Position>();
-                node_rows.clear();
-                node_rows.reserve(view.size_hint());
-                for (auto e : view) {
-                    const auto& id = view.get<const ::Component::NodeID>(e);
-                    const auto& p = view.get<const ::Component::Position>(e);
-                    node_rows.push_back(NodeListRow{ id.value, p.x, p.y, p.z });
-                }
-                std::sort(node_rows.begin(), node_rows.end(), [](const NodeListRow& a, const NodeListRow& b) { return a.nid < b.nid; });
+                save_view_state("list_nodes");
+                build_nodes_list_view();
                 node_selected_row = node_rows.empty() ? -1 : 0;
-                left_view_mode = LeftViewMode::NodesList;
                 sync_nodes_focus();
                 focus_region = FocusRegion::TopLeftView;
                 return true;
             }
 
             if (cmd == "list_elements") {
-                auto& reg = session.data.registry;
-                auto view = reg.view<const ::Component::ElementID, const ::Component::ElementType, const ::Component::Connectivity>();
-                elem_rows.clear();
-                elem_rows.reserve(view.size_hint());
-                for (auto e : view) {
-                    const int eid = view.get<const ::Component::ElementID>(e).value;
-                    const int type_id = view.get<const ::Component::ElementType>(e).type_id;
-                    const auto& conn = view.get<const ::Component::Connectivity>(e);
-                    std::vector<int> nids;
-                    nids.reserve(conn.nodes.size());
-                    for (auto ne : conn.nodes) {
-                        if (!reg.valid(ne) || !reg.all_of<::Component::NodeID>(ne)) continue;
-                        nids.push_back(reg.get<::Component::NodeID>(ne).value);
-                    }
-                    std::string nodes_str;
-                    const std::size_t show_n = (std::min<std::size_t>)(nids.size(), 8);
-                    for (std::size_t i = 0; i < show_n; ++i) {
-                        if (i > 0) nodes_str += ", ";
-                        nodes_str += std::to_string(nids[i]);
-                    }
-                    if (nids.size() > show_n) nodes_str += " ...";
-                    elem_rows.push_back(ElemListRow{ eid, type_id, std::move(nodes_str) });
-                }
-                std::sort(elem_rows.begin(), elem_rows.end(), [](const ElemListRow& a, const ElemListRow& b) { return a.eid < b.eid; });
+                save_view_state("list_elements");
+                build_elements_list_view();
                 elem_selected_row = elem_rows.empty() ? -1 : 0;
-                left_view_mode = LeftViewMode::ElementsList;
                 sync_elems_focus();
                 focus_region = FocusRegion::TopLeftView;
                 return true;
@@ -1164,24 +1327,21 @@ void run_app_tui(AppSession& session) {
                     spdlog::error("Usage: panel <type> <id_or_name>  (type: node|elem|element|part|set)");
                     return true;
                 }
-                (void)open_panel_in_top_view(type, id_or_name);
+                (void)open_panel_in_top_view(type, id_or_name, true);
                 return true;
             }
 
             // Fallback: execute existing command processor (logs go to spdlog sinks).
+            view_history.clear();
             process_command(cmd, session);
             return true;
         }
 
         // Quick escape for clearing a view.
         if (event == Event::Escape) {
-            top_view.reset();
-            left_view_mode = LeftViewMode::None;
-            node_rows.clear();
-            node_selected_row = -1;
-            elem_rows.clear();
-            elem_selected_row = -1;
-            left_focus = 0.0f;
+            if (!restore_view_state()) {
+                clear_left_view();
+            }
             return true;
         }
 
