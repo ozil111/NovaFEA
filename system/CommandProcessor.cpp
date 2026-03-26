@@ -166,6 +166,7 @@ void process_command(const std::string& command_line, AppSession& session) {
         
         if (parse_success) {
             session.mesh_loaded = true;
+            rebuild_inspector_if_mesh_loaded(session);
             // Count entities using views
             auto node_count = session.data.registry.view<Component::Position>().size();
             auto element_count = session.data.registry.view<Component::Connectivity>().size();
