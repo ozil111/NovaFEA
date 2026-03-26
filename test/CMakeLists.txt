@@ -9,6 +9,8 @@ find_package(eigen3 CONFIG REQUIRED)
 find_package(gtest CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(entt CONFIG REQUIRED)
+find_package(ftxui CONFIG REQUIRED)
+find_package(tinyxml2 CONFIG REQUIRED)
 
 # MSVC specific settings
 if(MSVC)
@@ -46,6 +48,12 @@ add_executable(test_assembly_system
     ${SYSTEM_SOURCES}
 )
 
+# Test executable for JSON exporter
+add_executable(test_json_exporter 
+    test_json_exporter.cpp
+    ${SYSTEM_SOURCES}
+)
+
 # Link libraries
 target_link_libraries(test_assembly_system
     spdlog::spdlog
@@ -53,6 +61,22 @@ target_link_libraries(test_assembly_system
     Eigen3::Eigen
     nlohmann_json::nlohmann_json
     EnTT::EnTT
+    ftxui::dom
+    ftxui::screen
+    tinyxml2::tinyxml2
+    GTest::gtest
+    GTest::gtest_main
+)
+
+target_link_libraries(test_json_exporter
+    spdlog::spdlog
+    fmt::fmt
+    Eigen3::Eigen
+    nlohmann_json::nlohmann_json
+    EnTT::EnTT
+    ftxui::dom
+    ftxui::screen
+    tinyxml2::tinyxml2
     GTest::gtest
     GTest::gtest_main
 )
@@ -60,16 +84,17 @@ target_link_libraries(test_assembly_system
 # Enable testing
 enable_testing()
 
-# Add test
+# Add tests
 add_test(NAME test_assembly_system COMMAND test_assembly_system)
+add_test(NAME test_json_exporter COMMAND test_json_exporter)
 
 # Set output directory (match parent project structure)
 if(MSVC)
-    set_target_properties(test_assembly_system PROPERTIES
+    set_target_properties(test_assembly_system test_json_exporter PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin/msvc/tests
     )
 else()
-    set_target_properties(test_assembly_system PROPERTIES
+    set_target_properties(test_assembly_system test_json_exporter PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin/${CMAKE_BUILD_TYPE}/tests
     )
 endif()

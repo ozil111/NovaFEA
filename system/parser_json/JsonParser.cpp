@@ -17,38 +17,115 @@
 #include "spdlog/spdlog.h"
 #include <fstream>
 #include <stdexcept>
+#include <vector>
 #include "JsonParser.h"
 
 using json = nlohmann::json;
 
-// ============================================================================
-// 主解析入�?
-// ============================================================================
-bool JsonParser::parse(const std::string& filepath, DataContext& data_context) {
-    spdlog::debug("JsonParser started for file: {}", filepath);
+namespace {
 
-    // 1. 加载 JSON 文件
+void fill_id_maps_from_registry(
+    entt::registry& registry,
+    std::unordered_map<int, entt::entity>& material_id_map,
+    std::unordered_map<int, entt::entity>& property_id_map,
+    std::unordered_map<int, entt::entity>& property_id_to_material,
+    std::unordered_map<int, entt::entity>& node_id_map,
+    std::unordered_map<int, entt::entity>& element_id_map,
+    std::unordered_map<int, entt::entity>& nodeset_id_map,
+    std::unordered_map<int, entt::entity>& eleset_id_map,
+    std::unordered_map<int, entt::entity>& load_id_map,
+    std::unordered_map<int, entt::entity>& boundary_id_map,
+    std::unordered_map<int, entt::entity>& curve_id_map,
+    std::unordered_map<int, entt::entity>& analysis_id_map
+) {
+    for (auto e : registry.view<Component::MaterialID>()) {
+        material_id_map[registry.get<Component::MaterialID>(e).value] = e;
+    }
+    for (auto e : registry.view<Component::PropertyID>()) {
+        property_id_map[registry.get<Component::PropertyID>(e).value] = e;
+    }
+    for (auto e : registry.view<Component::SimdroidPart>()) {
+        const auto& part = registry.get<Component::SimdroidPart>(e);
+        if (!registry.valid(part.section) || !registry.all_of<Component::PropertyID>(part.section)) {
+            continue;
+        }
+        int pid = registry.get<Component::PropertyID>(part.section).value;
+        if (registry.valid(part.material)) {
+            property_id_to_material[pid] = part.material;
+        }
+    }
+    for (auto e : registry.view<Component::NodeID>()) {
+        node_id_map[registry.get<Component::NodeID>(e).value] = e;
+    }
+    for (auto e : registry.view<Component::ElementID>()) {
+        element_id_map[registry.get<Component::ElementID>(e).value] = e;
+    }
+    for (auto e : registry.view<Component::NodeSetID>()) {
+        nodeset_id_map[registry.get<Component::NodeSetID>(e).value] = e;
+    }
+    for (auto e : registry.view<Component::EleSetID>()) {
+        eleset_id_map[registry.get<Component::EleSetID>(e).value] = e;
+    }
+    for (auto e : registry.view<Component::LoadID>()) {
+        load_id_map[registry.get<Component::LoadID>(e).value] = e;
+    }
+    for (auto e : registry.view<Component::BoundaryID>()) {
+        boundary_id_map[registry.get<Component::BoundaryID>(e).value] = e;
+    }
+    for (auto e : registry.view<Component::CurveID>()) {
+        curve_id_map[registry.get<Component::CurveID>(e).value] = e;
+    }
+    for (auto e : registry.view<Component::AnalysisID>()) {
+        analysis_id_map[registry.get<Component::AnalysisID>(e).value] = e;
+    }
+}
+
+void destroy_json_derived_simdroid_parts(entt::registry& registry) {
+    std::vector<std::pair<entt::entity, entt::entity>> part_and_sets;
+    for (auto e : registry.view<Component::SimdroidPart>()) {
+        const auto& part = registry.get<Component::SimdroidPart>(e);
+        if (part.name.size() >= 9 && part.name.compare(0, 9, "Part_pid_") == 0) {
+            part_and_sets.emplace_back(e, part.element_set);
+        }
+    }
+    for (const auto& [part_e, set_e] : part_and_sets) {
+        (void)part_e;
+        if (registry.valid(set_e)) {
+            registry.destroy(set_e);
+        }
+    }
+    for (const auto& [part_e, set_e] : part_and_sets) {
+        (void)set_e;
+        if (registry.valid(part_e)) {
+            registry.destroy(part_e);
+        }
+    }
+}
+
+bool load_json_document(const std::string& filepath, json& out_j) {
     std::ifstream file(filepath);
     if (!file.is_open()) {
         spdlog::error("JsonParser could not open file: {}", filepath);
         return false;
     }
-
-    json j;
     try {
-        // 启用 nlohmann::json 的注释支�?
-        // 注意：需�?nlohmann::json 3.10.0+ 版本
-        j = json::parse(file, nullptr, true, true);  // 最后一个参数启用注释忽�?
+        out_j = json::parse(file, nullptr, true, true);
     } catch (const json::exception& e) {
         spdlog::error("JSON parsing error: {}", e.what());
         return false;
     }
+    return true;
+}
 
-    // 2. 清空 DataContext，从干净状态开�?
-    data_context.clear();
+} // namespace
+
+bool JsonParser::run_parse_pipeline(const json& j, DataContext& data_context, bool replace_context) {
+    if (replace_context) {
+        data_context.clear();
+    }
+
     auto& registry = data_context.registry;
 
-    // 3. 准备所有的 ID -> entity 映射�?
     std::unordered_map<int, entt::entity> material_id_map;
     std::unordered_map<int, entt::entity> property_id_map;
     std::unordered_map<int, entt::entity> node_id_map;
@@ -61,70 +138,89 @@ bool JsonParser::parse(const std::string& filepath, DataContext& data_context) {
     std::unordered_map<int, entt::entity> analysis_id_map;
     std::unordered_map<int, entt::entity> output_id_map;
 
-    // 4. 按照严格的依赖顺序执�?N-Step 解析
+    std::unordered_map<int, entt::entity> property_id_to_material;
+    if (!replace_context) {
+        fill_id_maps_from_registry(
+            registry,
+            material_id_map,
+            property_id_map,
+            property_id_to_material,
+            node_id_map,
+            element_id_map,
+            nodeset_id_map,
+            eleset_id_map,
+            load_id_map,
+            boundary_id_map,
+            curve_id_map,
+            analysis_id_map
+        );
+    }
+
     try {
-        // 步骤 1: Material (无依�?
         if (j.contains("material")) {
             parse_materials(j, registry, material_id_map);
         }
 
-        // 步骤 2: Property (依赖 Material)
+        // Step 2: Property (depends on Material)
         std::unordered_map<int, entt::entity> property_id_to_material;
         if (j.contains("property")) {
             parse_properties(j, registry, material_id_map, property_id_map, property_id_to_material);
         }
 
-        // 步骤 3: Node (无依�?
+        // Step 3: Node (no dependencies)
         if (j.contains("mesh") && j["mesh"].contains("nodes")) {
             parse_nodes(j, registry, node_id_map);
         }
 
-        // 步骤 4: Element (依赖 Node, Property)
+        // Step 4: Element (depends on Node, Property)
         if (j.contains("mesh") && j["mesh"].contains("elements")) {
             parse_elements(j, registry, node_id_map, property_id_map, element_id_map);
         }
 
-        // 步骤 4.5: �?Property 构建 SimdroidPart 与单元集（材料通过 Part 绑定�?
+        // Step 4.5: Build SimdroidPart and element sets from Property (materials bound through Part)
         if (j.contains("property") && j.contains("mesh") && j["mesh"].contains("elements")) {
+            if (!replace_context) {
+                destroy_json_derived_simdroid_parts(registry);
+            }
             build_parts_from_properties(registry, property_id_map, property_id_to_material, element_id_map);
         }
 
-        // 步骤 5: NodeSet (依赖 Node)
+        // Step 5: NodeSet (depends on Node)
         if (j.contains("nodeset")) {
             parse_nodesets(j, registry, node_id_map, nodeset_id_map);
         }
 
-        // 步骤 6: EleSet (依赖 Element)
+        // Step 6: EleSet (depends on Element)
         if (j.contains("eleset")) {
             parse_elesets(j, registry, element_id_map, eleset_id_map);
         }
 
-        // 步骤 6.5: Curve (无依赖，需要在Load之前解析)
+        // Step 6.5: Curve (no dependencies, needs to be parsed before Load)
         if (j.contains("curve")) {
             parse_curves(j, registry, curve_id_map);
         }
 
-        // 步骤 7: Load (依赖 Curve)
+        // Step 7: Load (depends on Curve)
         if (j.contains("load")) {
             parse_loads(j, registry, load_id_map, curve_id_map);
         }
 
-        // 步骤 8: Boundary (无依�?
+        // Step 8: Boundary (no dependencies)
         if (j.contains("boundary")) {
             parse_boundaries(j, registry, boundary_id_map);
         }
 
-        // 步骤 9: 应用 Load (依赖 Load, NodeSet)
+        // Step 9: Apply Load (depends on Load, NodeSet)
         if (j.contains("load")) {
             apply_loads(j, registry, load_id_map, nodeset_id_map);
         }
 
-        // 步骤 10: 应用 Boundary (依赖 Boundary, NodeSet)
+        // Step 10: Apply Boundary (depends on Boundary, NodeSet)
         if (j.contains("boundary")) {
             apply_boundaries(j, registry, boundary_id_map, nodeset_id_map);
         }
 
-        // 步骤 11: 解析 Analysis (无依赖，但应在最后解）
+        // Step 11: Parse Analysis (no dependencies, but should be parsed last)
         if (j.contains("analysis") && j["analysis"].is_array() && !j["analysis"].empty()) {
             parse_analysis(j, registry, analysis_id_map);
             // 取第一个分析配置对应的 entity 同步到DataContext
@@ -141,7 +237,7 @@ bool JsonParser::parse(const std::string& filepath, DataContext& data_context) {
             spdlog::debug("No 'analysis' field found, defaulting to 'static' analysis");
         }
 
-        // 步骤 12: 解析 Output (无依赖，但应在最后解�?
+        // Step 12: Parse Output (no dependencies, but should be parsed last)
         if (j.contains("output")) {
             parse_output(j, registry, output_id_map);
             auto it = output_id_map.find(0);
@@ -159,17 +255,40 @@ bool JsonParser::parse(const std::string& filepath, DataContext& data_context) {
     // 5. 统计并报�?
     auto node_count = registry.view<Component::Position>().size();
     auto element_count = registry.view<Component::Connectivity>().size();
-    auto material_count = material_id_map.size();
-    auto property_count = property_id_map.size();
-    
-    spdlog::info("JsonParser finished. Materials: {}, Properties: {}, Nodes: {}, Elements: {}", 
-                 material_count, property_count, node_count, element_count);
-    
+    spdlog::info("JsonParser {}. Materials: {}, Properties: {}, Nodes: {}, Elements: {}",
+                 replace_context ? "finished (full import)" : "merge finished",
+                 material_id_map.size(), property_id_map.size(), node_count, element_count);
+
     return true;
 }
 
 // ============================================================================
-// 步骤 1: 解析 Material
+// Main JSON parse entry (full replace)
+// ============================================================================
+bool JsonParser::parse(const std::string& filepath, DataContext& data_context) {
+    spdlog::debug("JsonParser started for file: {}", filepath);
+
+    json j;
+    if (!load_json_document(filepath, j)) {
+        return false;
+    }
+
+    return run_parse_pipeline(j, data_context, true);
+}
+
+bool JsonParser::apply_fragment(const std::string& filepath, DataContext& data_context) {
+    spdlog::debug("JsonParser::apply_fragment for file: {}", filepath);
+
+    json j;
+    if (!load_json_document(filepath, j)) {
+        return false;
+    }
+
+    return run_parse_pipeline(j, data_context, false);
+}
+
+// ============================================================================
+// Step 1: Parse Material
 // ============================================================================
 void JsonParser::parse_materials(
     const json& j,
@@ -218,7 +337,7 @@ void JsonParser::parse_materials(
 }
 
 // ============================================================================
-// 步骤 2: 解析 Property
+// Step 2: Parse Property
 // ============================================================================
 void JsonParser::parse_properties(
     const json& j,
@@ -279,7 +398,7 @@ void JsonParser::parse_properties(
 }
 
 // ============================================================================
-// 步骤 3: 解析 Node
+// Step 3: Parse Node
 // ============================================================================
 void JsonParser::parse_nodes(
     const json& j,
@@ -313,7 +432,7 @@ void JsonParser::parse_nodes(
 }
 
 // ============================================================================
-// 步骤 4: 解析 Element
+// Step 4: Parse Element
 // ============================================================================
 void JsonParser::parse_elements(
     const json& j,
@@ -367,7 +486,7 @@ void JsonParser::parse_elements(
 }
 
 // ============================================================================
-// 步骤 4.5: �?Property 构建 SimdroidPart 与单元集
+// Step 4.5: Build SimdroidPart and element sets from Property
 // ============================================================================
 void JsonParser::build_parts_from_properties(
     entt::registry& registry,
@@ -423,7 +542,7 @@ void JsonParser::build_parts_from_properties(
 }
 
 // ============================================================================
-// 步骤 5: 解析 NodeSet
+// Step 5: Parse NodeSet
 // ============================================================================
 void JsonParser::parse_nodesets(
     const json& j,
@@ -466,7 +585,7 @@ void JsonParser::parse_nodesets(
 }
 
 // ============================================================================
-// 步骤 6: 解析 EleSet
+// Step 6: Parse EleSet
 // ============================================================================
 void JsonParser::parse_elesets(
     const json& j,
@@ -509,7 +628,7 @@ void JsonParser::parse_elesets(
 }
 
 // ============================================================================
-// 步骤 6.5: 解析 Curve（曲线定义）
+// Step 6.5: Parse Curve (curve definitions)
 // ============================================================================
 void JsonParser::parse_curves(
     const json& j,
@@ -569,7 +688,7 @@ void JsonParser::parse_curves(
 }
 
 // ============================================================================
-// 步骤 7: 解析 Load（抽象定义）
+// Step 7: Parse Load (abstract definitions)
 // ============================================================================
 void JsonParser::parse_loads(
     const json& j,
@@ -663,7 +782,7 @@ void JsonParser::parse_loads(
 }
 
 // ============================================================================
-// 步骤 8: 解析 Boundary（抽象定义）
+// Step 8: Parse Boundary (abstract definitions)
 // ============================================================================
 void JsonParser::parse_boundaries(
     const json& j,
@@ -710,7 +829,7 @@ void JsonParser::parse_boundaries(
 }
 
 // ============================================================================
-// 步骤 9: 应用 Load �?Node（建立引用关系）
+// Step 9: Apply Load to Node (establish reference relationships)
 // ============================================================================
 void JsonParser::apply_loads(
     const json& j,
@@ -755,7 +874,7 @@ void JsonParser::apply_loads(
 }
 
 // ============================================================================
-// 步骤 10: 应用 Boundary �?Node（建立引用关系）
+// Step 10: Apply Boundary to Node (establish reference relationships)
 // ============================================================================
 void JsonParser::apply_boundaries(
     const json& j,
@@ -799,7 +918,7 @@ void JsonParser::apply_boundaries(
 }
 
 // ============================================================================
-// 步骤 11: 解析 Analysis 实体
+// Step 11: Parse Analysis entities
 // ============================================================================
 void JsonParser::parse_analysis(const nlohmann::json& j, entt::registry& registry, std::unordered_map<int, entt::entity>& analysis_id_map)
 {

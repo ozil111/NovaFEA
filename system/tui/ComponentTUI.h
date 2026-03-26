@@ -11,6 +11,7 @@
 #include <vector>
 
 struct SimdroidInspector;
+class AppSession;
 
 namespace tui {
 
@@ -60,7 +61,31 @@ entt::entity resolve_panel_entity(entt::registry& reg, SimdroidInspector* insp,
 void render_panel(entt::registry& reg, entt::entity e, SimdroidInspector* insp,
     PanelEntityKind kind, const std::string& display_id);
 
+/** Render a simple node list view (NodeID + Position) to stdout. */
+void render_nodes_list(entt::registry& reg);
+
+/** Render a simple element list view (ElementID + ElementType + Connectivity) to stdout. */
+void render_elements_list(entt::registry& reg);
+
+/**
+ * Render element list and return selected ElementID.
+ * Returns -1 when the user quits without selecting.
+ */
+int render_elements_list_select(entt::registry& reg);
+
 /** Force-path insight element for a node (PartGraph edges, load/constraint). Returns empty element if none. */
 Element force_path_element(entt::registry& reg, entt::entity node_entity, SimdroidInspector* insp);
+
+/**
+ * Start the interactive application TUI.
+ * Layout: top = status/view area, bottom = command line input.
+ */
+void run_app_tui(AppSession& session);
+
+/**
+ * Install a spdlog sink to mirror the original console output into TUI output pane.
+ * Safe to call multiple times.
+ */
+void install_tui_log_sink();
 
 } // namespace tui

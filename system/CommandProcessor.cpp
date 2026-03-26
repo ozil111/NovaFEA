@@ -20,6 +20,8 @@
 #include "analysis/MermaidReporter.h"
 #include "tui/ComponentTUI.h"
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <sstream>
 #include <vector>
 #include <cstdlib>
@@ -27,7 +29,7 @@
 
 namespace {
 
-// 基础查找辅助：节�?/ 单元 / 集合
+// Basic lookup helpers: nodes / elements / sets
 entt::entity find_node_by_id(entt::registry& registry, int nid) {
     auto view = registry.view<const Component::NodeID>();
     for (auto e : view) {
@@ -58,6 +60,24 @@ entt::entity find_set_by_name(entt::registry& registry, const std::string& name)
     return entt::null;
 }
 
+int allocate_next_node_id(entt::registry& registry) {
+    int max_id = 0;
+    auto view = registry.view<const Component::NodeID>();
+    for (auto e : view) {
+        max_id = std::max(max_id, view.get<const Component::NodeID>(e).value);
+    }
+    return max_id + 1;
+}
+
+int allocate_next_element_id(entt::registry& registry) {
+    int max_id = 0;
+    auto view = registry.view<const Component::ElementID>();
+    for (auto e : view) {
+        max_id = std::max(max_id, view.get<const Component::ElementID>(e).value);
+    }
+    return max_id + 1;
+}
+
 entt::entity get_or_create_set_entity(entt::registry& registry, const std::string& name) {
     entt::entity e = find_set_by_name(registry, name);
     if (e != entt::null) return e;
@@ -66,10 +86,10 @@ entt::entity get_or_create_set_entity(entt::registry& registry, const std::strin
     return e;
 }
 
-int infer_element_type_from_node_count(std::size_t count) {
+[[maybe_unused]] int infer_element_type_from_node_count(std::size_t count) {
     if (count == 2) return 102;   // Line2
     if (count == 3) return 203;   // Tri3
-    if (count == 4) return 304;   // Tet4 / Quad4，默认按体单元处�?
+    if (count == 4) return 304;   // Tet4 / Quad4, default to volume element
     if (count == 8) return 308;   // Hex8
     if (count == 10) return 310;  // Tet10
     if (count == 20) return 320;  // Hex20
@@ -101,12 +121,13 @@ void process_command(const std::string& command_line, AppSession& session) {
         spdlog::info("Exiting NovaFEA. Goodbye!");
     }
     else if (command == "help") {
-        spdlog::info("Available commands: import, import_simdroid, export_simdroid, "
+        spdlog::info("Available commands: import, import_simdroid, export_simdroid, json_apply, "
                      "info, build_topology, list_bodies, show_body, "
                      "list_parts, delete_part, graph, validate_constraints, list_constraint_warnings, "
                      "panel node <nid>, panel elem <eid>, panel part <name>, panel set <name>, "
-                     "node, node_add, node_move, node_delete, "
+                     "node, list_nodes, node_add, node_move, node_delete, "
                      "elem, elem_add, elem_delete, "
+                     "list_elements, "
                      "list_sets, set_info, set_addnode, set_addelem, set_removenode, set_removeelem, "
                      "save, help, quit");
     }
@@ -118,7 +139,7 @@ void process_command(const std::string& command_line, AppSession& session) {
             return;
         }
         
-        // 检查文件是否存�?
+        // Check if file exists
         if (!std::filesystem::exists(file_path)) {
             spdlog::error("File does not exist: {}", file_path);
             return;
@@ -127,7 +148,7 @@ void process_command(const std::string& command_line, AppSession& session) {
         session.clear_data();
         spdlog::info("Importing mesh from: {}", file_path);
         
-        // 根据文件扩展名自动选择解析�?
+        // Automatically select parser based on file extension
         std::filesystem::path path(file_path);
         std::string extension = path.extension().string();
         bool parse_success = false;
@@ -153,8 +174,46 @@ void process_command(const std::string& command_line, AppSession& session) {
             spdlog::error("Failed to import mesh from: {}", file_path);
         }
     }
+    else if (command == "json_apply") {
+        std::string file_path;
+        ss >> file_path;
+        if (file_path.empty()) {
+            spdlog::error("Usage: json_apply <path_to_fragment.json|.jsonc>");
+            spdlog::info("Merges a JSON fragment into the current model using the same keys/schema as import "
+                         "(material, property, mesh, nodeset, eleset, curve, load, boundary, analysis, output). "
+                         "Does not clear existing data; duplicate IDs in the fragment are skipped.");
+            return;
+        }
+        if (!std::filesystem::exists(file_path)) {
+            spdlog::error("File does not exist: {}", file_path);
+            return;
+        }
+        const std::filesystem::path path(file_path);
+        const std::string ext = path.extension().string();
+        if (ext != ".json" && ext != ".jsonc") {
+            spdlog::error("json_apply expects .json or .jsonc, got: {}", ext);
+            return;
+        }
+        spdlog::info("Applying JSON fragment from: {}", file_path);
+        if (!JsonParser::apply_fragment(file_path, session.data)) {
+            spdlog::error("json_apply failed for: {}", file_path);
+            return;
+        }
+        if (!session.mesh_loaded) {
+            session.mesh_loaded = session.data.registry.view<Component::Position>().size() > 0;
+        }
+        std::ifstream fragment(file_path);
+        std::string frag_text((std::istreambuf_iterator<char>(fragment)), std::istreambuf_iterator<char>());
+        const bool mentions_mesh = frag_text.find("\"mesh\"") != std::string::npos;
+        const bool mentions_property = frag_text.find("\"property\"") != std::string::npos;
+        if (mentions_mesh || mentions_property) {
+            invalidate_topology_if_needed(session);
+            rebuild_inspector_if_mesh_loaded(session);
+        }
+        spdlog::info("json_apply completed.");
+    }
     // =======================================================
-    // 新增: Simdroid 导入命令
+    // New: Simdroid import command
     // =======================================================
     else if (command == "import_simdroid") {
         std::string control_path_str;
@@ -170,7 +229,7 @@ void process_command(const std::string& command_line, AppSession& session) {
             return;
         }
 
-        // 自动推导 mesh.dat 路径 (假设在同级目�?
+        // Automatically infer mesh.dat path (assuming in the same directory)
         std::filesystem::path mesh_path = control_path.parent_path() / "mesh.dat";
         if (!std::filesystem::exists(mesh_path)) {
             spdlog::error("Mesh file not found at expected location: {}", mesh_path.string());
@@ -184,12 +243,12 @@ void process_command(const std::string& command_line, AppSession& session) {
 
         session.clear_data();
 
-        // 调用 Parser
+        // Call Parser
         try {
             if (SimdroidParser::parse(mesh_path.string(), control_path.string(), session.data)) {
                 session.mesh_loaded = true;
 
-                // 核心步骤：导入成功后，立即构�?Inspector 索引
+                // Core step: After successful import, immediately build Inspector index
                 session.inspector.build(session.data.registry);
 
                 spdlog::info("Simdroid import successful. Entered Simdroid Interactive Mode.");
@@ -201,7 +260,7 @@ void process_command(const std::string& command_line, AppSession& session) {
         }
     }
     // =======================================================
-    // 新增: Simdroid 导出命令 (Blueprint Strategy)
+    // New: Simdroid export command (Blueprint Strategy)
     // =======================================================
     else if (command == "export_simdroid") {
         if (!session.mesh_loaded) {
@@ -223,11 +282,11 @@ void process_command(const std::string& command_line, AppSession& session) {
             std::filesystem::path control_path;
 
             if (!arg2.empty()) {
-                // 显式指定两个路径: export_simdroid <mesh.dat> <control.json>
+                // Explicitly specify two paths: export_simdroid <mesh.dat> <control.json>
                 mesh_path = std::filesystem::path(arg1);
                 control_path = std::filesystem::path(arg2);
             } else {
-                // 只给一个参数时，按扩展名推�?
+                // When only one parameter is given, infer based on extension
                 std::filesystem::path out(arg1);
                 const std::string ext = out.extension().string();
 
@@ -238,7 +297,7 @@ void process_command(const std::string& command_line, AppSession& session) {
                     mesh_path = out;
                     control_path = out.parent_path() / "control.json";
                 } else {
-                    // 当作输出目录
+                    // Treat as output directory
                     mesh_path = out / "mesh.dat";
                     control_path = out / "control.json";
                 }
@@ -370,7 +429,7 @@ void process_command(const std::string& command_line, AppSession& session) {
         }
     }
     // =======================================================
-    // 新增: Simdroid 交互式调试面�?
+    // New: Simdroid interactive inspection commands
     // =======================================================
     else if (command == "list_parts") {
         if (!session.mesh_loaded) { spdlog::warn("No mesh loaded."); return; }
@@ -394,7 +453,7 @@ void process_command(const std::string& command_line, AppSession& session) {
         size_t deleted = 0;
         size_t failed = 0;
         for (const auto& part_name : part_names) {
-            // delete_part() 会清�?inspector 索引；为保证多次删除稳定，这里每次都先重建索�?
+            // delete_part() clears the inspector index; rebuild before each delete for stable multi-delete
             session.inspector.build(session.data.registry);
 
             if (session.inspector.delete_part(session.data.registry, part_name)) {
@@ -407,9 +466,9 @@ void process_command(const std::string& command_line, AppSession& session) {
         }
 
         if (deleted > 0) {
-            // 删除后必须重建索引，否则 eid_to_part 等映射会失效导致 Crash
+            // Rebuild index after deletes or eid_to_part and similar maps go stale and may crash
             session.inspector.build(session.data.registry);
-            // 拓扑数据会因实体删除而失效，清理以避免后续误�?
+            // Topology is invalid after entity removal; clear to avoid stale use
             if (session.data.registry.ctx().contains<std::unique_ptr<TopologyData>>()) {
                 session.data.registry.ctx().erase<std::unique_ptr<TopologyData>>();
             }
@@ -429,20 +488,20 @@ void process_command(const std::string& command_line, AppSession& session) {
 
         spdlog::info("Analyzing connectivity...");
 
-        // 1. 构建�?
+        // 1. Build part connectivity graph
         PartGraph graph = GraphBuilder::build(session.data.registry, session.inspector);
 
-        // 2. (可�? 进行一些统计分析，比如打印孤立节点
+        // 2. Optional: simple stats (e.g. isolated parts)
         int isolated_count = 0;
         for (const auto& [n, node] : graph.nodes) {
             if (node.edges.empty()) isolated_count++;
         }
         spdlog::info("Analysis complete. Parts: {}, Isolated: {}", graph.nodes.size(), isolated_count);
 
-        // 3. 生成报告
+        // 3. Generate report
         MermaidReporter::generate_interactive_html(graph, output_filename);
 
-        // 4. (可�? 尝试自动打开浏览�?(Windows/Linux/Mac)
+        // 4. Optional: open default browser (Windows only here)
 #ifdef _WIN32
         std::string cmd = "start " + output_filename;
         system(cmd.c_str());
@@ -467,37 +526,26 @@ void process_command(const std::string& command_line, AppSession& session) {
         SimdroidParser::list_constraint_warnings(registry);
     }
     // =======================================================
-    // 基础节点 / 单元操作
+    // Basic node / element operations
     // =======================================================
     else if (command == "node_add") {
-        if (!session.mesh_loaded) {
-            spdlog::error("No mesh loaded. Please 'import' or 'import_simdroid' first.");
-            return;
-        }
-        int nid;
         double x, y, z;
-        if (!(ss >> nid >> x >> y >> z)) {
-            spdlog::error("Usage: node_add <nid> <x> <y> <z>");
+        if (!(ss >> x >> y >> z)) {
+            spdlog::error("Usage: node_add <x> <y> <z>");
             return;
         }
         auto& registry = session.data.registry;
-        if (find_node_by_id(registry, nid) != entt::null) {
-            spdlog::error("Node {} already exists.", nid);
-            return;
-        }
+        int nid = allocate_next_node_id(registry);
         auto e = registry.create();
         registry.emplace<Component::Position>(e, x, y, z);
         registry.emplace<Component::NodeID>(e, nid);
         registry.emplace<Component::OriginalID>(e, nid);
         spdlog::info("Node {} created at ({}, {}, {}).", nid, x, y, z);
+        session.mesh_loaded = true;
         invalidate_topology_if_needed(session);
         rebuild_inspector_if_mesh_loaded(session);
     }
     else if (command == "node_move") {
-        if (!session.mesh_loaded) {
-            spdlog::error("No mesh loaded. Please 'import' or 'import_simdroid' first.");
-            return;
-        }
         int nid;
         double x, y, z;
         if (!(ss >> nid >> x >> y >> z)) {
@@ -515,13 +563,10 @@ void process_command(const std::string& command_line, AppSession& session) {
         pos.y = y;
         pos.z = z;
         spdlog::info("Node {} moved to ({}, {}, {}).", nid, x, y, z);
-        // 拓扑结构不变，仅坐标变化，不必重建拓�?/ 索引
+        session.mesh_loaded = true;
+        // Topology unchanged (coordinates only); no topology / inspector rebuild needed
     }
     else if (command == "node_delete") {
-        if (!session.mesh_loaded) {
-            spdlog::error("No mesh loaded. Please 'import' or 'import_simdroid' first.");
-            return;
-        }
         int nid;
         if (!(ss >> nid)) {
             spdlog::error("Usage: node_delete <nid>");
@@ -533,7 +578,7 @@ void process_command(const std::string& command_line, AppSession& session) {
             spdlog::error("Node {} not found.", nid);
             return;
         }
-        // 安全检查：如果节点仍被任何单元使用，则拒绝删除
+        // Safety: refuse delete if the node is still referenced by any element
         auto view_elems = registry.view<const Component::ElementID, const Component::Connectivity>();
         for (auto elem_e : view_elems) {
             const auto& conn = view_elems.get<const Component::Connectivity>(elem_e);
@@ -545,17 +590,18 @@ void process_command(const std::string& command_line, AppSession& session) {
         }
         registry.destroy(node_e);
         spdlog::info("Node {} deleted.", nid);
+        session.mesh_loaded = true;
         invalidate_topology_if_needed(session);
         rebuild_inspector_if_mesh_loaded(session);
     }
     else if (command == "elem_add") {
-        if (!session.mesh_loaded) {
-            spdlog::error("No mesh loaded. Please 'import' or 'import_simdroid' first.");
+        int type_id;
+        if (!(ss >> type_id)) {
+            spdlog::error("Usage: elem_add <typeid> <nid1> <nid2> ...");
             return;
         }
-        int eid;
-        if (!(ss >> eid)) {
-            spdlog::error("Usage: elem_add <eid> <nid1> <nid2> ...");
+        if (type_id <= 0) {
+            spdlog::error("elem_add requires a positive typeid.");
             return;
         }
         std::vector<int> node_ids;
@@ -567,10 +613,7 @@ void process_command(const std::string& command_line, AppSession& session) {
             return;
         }
         auto& registry = session.data.registry;
-        if (find_element_by_id(registry, eid) != entt::null) {
-            spdlog::error("Element {} already exists.", eid);
-            return;
-        }
+        int eid = allocate_next_element_id(registry);
         std::vector<entt::entity> node_entities;
         node_entities.reserve(node_ids.size());
         for (int nid : node_ids) {
@@ -581,11 +624,6 @@ void process_command(const std::string& command_line, AppSession& session) {
             }
             node_entities.push_back(ne);
         }
-        int type_id = infer_element_type_from_node_count(node_entities.size());
-        if (type_id == 0) {
-            spdlog::error("Unsupported element node count {} in elem_add.", node_entities.size());
-            return;
-        }
         auto e = registry.create();
         registry.emplace<Component::ElementID>(e, eid);
         registry.emplace<Component::OriginalID>(e, eid);
@@ -593,14 +631,11 @@ void process_command(const std::string& command_line, AppSession& session) {
         auto& conn = registry.emplace<Component::Connectivity>(e);
         conn.nodes = std::move(node_entities);
         spdlog::info("Element {} created with {} nodes (type_id={}).", eid, conn.nodes.size(), type_id);
+        session.mesh_loaded = true;
         invalidate_topology_if_needed(session);
         rebuild_inspector_if_mesh_loaded(session);
     }
     else if (command == "elem_delete") {
-        if (!session.mesh_loaded) {
-            spdlog::error("No mesh loaded. Please 'import' or 'import_simdroid' first.");
-            return;
-        }
         int eid;
         if (!(ss >> eid)) {
             spdlog::error("Usage: elem_delete <eid>");
@@ -612,7 +647,7 @@ void process_command(const std::string& command_line, AppSession& session) {
             spdlog::error("Element {} not found.", eid);
             return;
         }
-        // 移除与该单元关联�?Surface
+        // Remove Surfaces tied to this element
         {
             std::vector<entt::entity> surfaces_to_delete;
             auto surf_view = registry.view<const Component::SurfaceParentElement>();
@@ -623,7 +658,7 @@ void process_command(const std::string& command_line, AppSession& session) {
                 }
             }
             if (!surfaces_to_delete.empty()) {
-                // 从所�?SurfaceSetMembers 中移�?
+                // Remove from all SurfaceSetMembers
                 std::unordered_set<entt::entity> surf_set(surfaces_to_delete.begin(), surfaces_to_delete.end());
                 auto sset_view = registry.view<Component::SurfaceSetMembers>();
                 for (auto set_e : sset_view) {
@@ -640,7 +675,7 @@ void process_command(const std::string& command_line, AppSession& session) {
                 }
             }
         }
-        // 从所�?ElementSetMembers 中移除该单元
+        // Remove this element from all ElementSetMembers
         {
             auto eset_view = registry.view<Component::ElementSetMembers>();
             for (auto set_e : eset_view) {
@@ -653,11 +688,12 @@ void process_command(const std::string& command_line, AppSession& session) {
         }
         registry.destroy(elem_e);
         spdlog::info("Element {} deleted.", eid);
+        session.mesh_loaded = true;
         invalidate_topology_if_needed(session);
         rebuild_inspector_if_mesh_loaded(session);
     }
     // =======================================================
-    // 基础 Set 操作
+    // Basic set operations
     // =======================================================
     else if (command == "list_sets") {
         if (!session.mesh_loaded) {
@@ -747,10 +783,6 @@ void process_command(const std::string& command_line, AppSession& session) {
         }
     }
     else if (command == "set_addnode") {
-        if (!session.mesh_loaded) {
-            spdlog::error("No mesh loaded. Please 'import' or 'import_simdroid' first.");
-            return;
-        }
         std::string set_name;
         ss >> set_name;
         if (set_name.empty()) {
@@ -783,10 +815,6 @@ void process_command(const std::string& command_line, AppSession& session) {
         spdlog::info("set_addnode '{}' : added {} nodes.", set_name, added);
     }
     else if (command == "set_addelem") {
-        if (!session.mesh_loaded) {
-            spdlog::error("No mesh loaded. Please 'import' or 'import_simdroid' first.");
-            return;
-        }
         std::string set_name;
         ss >> set_name;
         if (set_name.empty()) {
@@ -819,10 +847,6 @@ void process_command(const std::string& command_line, AppSession& session) {
         spdlog::info("set_addelem '{}' : added {} elements.", set_name, added);
     }
     else if (command == "set_removenode") {
-        if (!session.mesh_loaded) {
-            spdlog::error("No mesh loaded. Please 'import' or 'import_simdroid' first.");
-            return;
-        }
         std::string set_name;
         ss >> set_name;
         if (set_name.empty()) {
@@ -857,10 +881,6 @@ void process_command(const std::string& command_line, AppSession& session) {
         spdlog::info("set_removenode '{}' : removed {} entries.", set_name, removed);
     }
     else if (command == "set_removeelem") {
-        if (!session.mesh_loaded) {
-            spdlog::error("No mesh loaded. Please 'import' or 'import_simdroid' first.");
-            return;
-        }
         std::string set_name;
         ss >> set_name;
         if (set_name.empty()) {
@@ -893,6 +913,17 @@ void process_command(const std::string& command_line, AppSession& session) {
             }
         }
         spdlog::info("set_removeelem '{}' : removed {} entries.", set_name, removed);
+    }
+    else if (command == "list_nodes") {
+        auto& registry = session.data.registry;
+        tui::render_nodes_list(registry);
+    }
+    else if (command == "list_elements") {
+        auto& registry = session.data.registry;
+        const int selected_eid = tui::render_elements_list_select(registry);
+        if (selected_eid >= 0) {
+            session.inspector.inspect_element(registry, selected_eid);
+        }
     }
     else if (command == "node") {
         int nid;
