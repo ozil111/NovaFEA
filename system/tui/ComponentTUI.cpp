@@ -781,7 +781,7 @@ void run_app_tui(AppSession& session) {
     float left_focus = 0.0f;
     float right_focus = 0.0f;
     FocusRegion focus_region = FocusRegion::BottomCommand;
-    enum class LeftViewMode { None, StaticElement, NodesList };
+    enum class LeftViewMode { None, StaticElement, NodesList, ElementsList };
     LeftViewMode left_view_mode = LeftViewMode::None;
     struct NodeListRow {
         int nid;
@@ -789,6 +789,14 @@ void run_app_tui(AppSession& session) {
     };
     std::vector<NodeListRow> node_rows;
     int node_selected_row = -1;
+
+    struct ElemListRow {
+        int eid;
+        int type_id;
+        std::string nodes;
+    };
+    std::vector<ElemListRow> elem_rows;
+    int elem_selected_row = -1;
 
     auto sync_nodes_focus = [&]() {
         if (node_rows.empty() || node_selected_row < 0) {
@@ -798,6 +806,51 @@ void run_app_tui(AppSession& session) {
         left_focus = clamp01(
             static_cast<float>(node_selected_row + 1) /
             static_cast<float>(node_rows.size() + 1));
+    };
+
+    auto sync_elems_focus = [&]() {
+        if (elem_rows.empty() || elem_selected_row < 0) {
+            left_focus = 0.0f;
+            return;
+        }
+        left_focus = clamp01(
+            static_cast<float>(elem_selected_row + 1) /
+            static_cast<float>(elem_rows.size() + 1));
+    };
+
+    auto render_elements_list_element = [&]() -> Element {
+        Elements lines;
+        lines.push_back(
+            hbox({
+                text(" ElementID ") | bold, text(" | "),
+                text(" TypeID ") | bold,    text(" | "),
+                text(" Nodes ") | bold,
+            }) | border);
+
+        for (size_t i = 0; i < elem_rows.size(); ++i) {
+            const auto& r = elem_rows[i];
+            Element row = hbox({
+                text(" " + std::to_string(r.eid) + " ") | color(Color::Cyan),
+                text(" | "),
+                text(" " + std::to_string(r.type_id) + " ") | color(Color::YellowLight),
+                text(" | "),
+                text(" " + r.nodes + " "),
+            }) | border;
+            if (static_cast<int>(i) == elem_selected_row)
+                row = row | inverted;
+            lines.push_back(std::move(row));
+        }
+
+        return vbox({
+            hbox({
+                text(" NovaFEA ") | bgcolor(Color::Blue) | color(Color::White) | bold,
+                text(" Elements ") | color(Color::Cyan),
+                filler(),
+                text("Count: " + std::to_string(elem_rows.size())) | dim
+            }) | border,
+            vbox(std::move(lines)),
+            text("Scroll: wheel / ↑↓ / PgUp PgDn   Tip: use 'panel elem <eid>' for details.") | dim,
+        });
     };
 
     auto render_nodes_list_element = [&]() -> Element {
@@ -850,6 +903,8 @@ void run_app_tui(AppSession& session) {
         Element top_left;
         if (left_view_mode == LeftViewMode::NodesList) {
             top_left = render_nodes_list_element();
+        } else if (left_view_mode == LeftViewMode::ElementsList) {
+            top_left = render_elements_list_element();
         } else if (top_view.has_value()) {
             top_left = top_view.value();
         } else {
@@ -923,6 +978,8 @@ void run_app_tui(AppSession& session) {
             left_view_mode = LeftViewMode::None;
             node_rows.clear();
             node_selected_row = -1;
+            elem_rows.clear();
+            elem_selected_row = -1;
 
             if (cmd == "quit" || cmd == "exit") {
                 session.is_running = false;
@@ -973,11 +1030,10 @@ void run_app_tui(AppSession& session) {
             }
 
             if (cmd == "list_elements") {
-                struct Row { int eid; int type_id; std::string nodes; };
-                std::vector<Row> rows;
                 auto& reg = session.data.registry;
                 auto view = reg.view<const ::Component::ElementID, const ::Component::ElementType, const ::Component::Connectivity>();
-                rows.reserve(view.size_hint());
+                elem_rows.clear();
+                elem_rows.reserve(view.size_hint());
                 for (auto e : view) {
                     const int eid = view.get<const ::Component::ElementID>(e).value;
                     const int type_id = view.get<const ::Component::ElementType>(e).type_id;
@@ -995,41 +1051,12 @@ void run_app_tui(AppSession& session) {
                         nodes_str += std::to_string(nids[i]);
                     }
                     if (nids.size() > show_n) nodes_str += " ...";
-                    rows.push_back(Row{ eid, type_id, std::move(nodes_str) });
+                    elem_rows.push_back(ElemListRow{ eid, type_id, std::move(nodes_str) });
                 }
-                std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.eid < b.eid; });
-
-                Elements lines;
-                lines.push_back(
-                    hbox({
-                        text(" ElementID ") | bold, text(" | "),
-                        text(" TypeID ") | bold,    text(" | "),
-                        text(" Nodes ") | bold,
-                    }) | border);
-
-                for (const auto& r : rows) {
-                    lines.push_back(
-                        hbox({
-                            text(" " + std::to_string(r.eid) + " ") | color(Color::Cyan),
-                            text(" | "),
-                            text(" " + std::to_string(r.type_id) + " ") | color(Color::YellowLight),
-                            text(" | "),
-                            text(" " + r.nodes + " "),
-                        }) | border);
-                }
-
-                top_view = vbox({
-                    hbox({
-                        text(" NovaFEA ") | bgcolor(Color::Blue) | color(Color::White) | bold,
-                        text(" Elements ") | color(Color::Cyan),
-                        filler(),
-                        text("Count: " + std::to_string(rows.size())) | dim
-                    }) | border,
-                    vbox(std::move(lines)),
-                    text("Tip: use 'panel elem <eid>' for details.") | dim,
-                });
-                left_view_mode = LeftViewMode::StaticElement;
-                left_focus = 0.0f;
+                std::sort(elem_rows.begin(), elem_rows.end(), [](const ElemListRow& a, const ElemListRow& b) { return a.eid < b.eid; });
+                elem_selected_row = elem_rows.empty() ? -1 : 0;
+                left_view_mode = LeftViewMode::ElementsList;
+                sync_elems_focus();
                 focus_region = FocusRegion::TopLeftView;
                 return true;
             }
@@ -1102,6 +1129,8 @@ void run_app_tui(AppSession& session) {
             left_view_mode = LeftViewMode::None;
             node_rows.clear();
             node_selected_row = -1;
+            elem_rows.clear();
+            elem_selected_row = -1;
             left_focus = 0.0f;
             return true;
         }
@@ -1128,6 +1157,32 @@ void run_app_tui(AppSession& session) {
             if (event == Event::PageDown) {
                 node_selected_row = (std::min)(max_idx, node_selected_row + 10);
                 sync_nodes_focus();
+                return true;
+            }
+        }
+
+        if (focus_region == FocusRegion::TopLeftView &&
+            left_view_mode == LeftViewMode::ElementsList &&
+            !elem_rows.empty()) {
+            const int max_idx = static_cast<int>(elem_rows.size()) - 1;
+            if (event == Event::ArrowUp) {
+                elem_selected_row = (std::max)(0, elem_selected_row - 1);
+                sync_elems_focus();
+                return true;
+            }
+            if (event == Event::ArrowDown) {
+                elem_selected_row = (std::min)(max_idx, elem_selected_row + 1);
+                sync_elems_focus();
+                return true;
+            }
+            if (event == Event::PageUp) {
+                elem_selected_row = (std::max)(0, elem_selected_row - 10);
+                sync_elems_focus();
+                return true;
+            }
+            if (event == Event::PageDown) {
+                elem_selected_row = (std::min)(max_idx, elem_selected_row + 10);
+                sync_elems_focus();
                 return true;
             }
         }
@@ -1178,6 +1233,21 @@ void run_app_tui(AppSession& session) {
                 if (m.button == Mouse::WheelDown) {
                     node_selected_row = (std::min)(max_idx, node_selected_row + 3);
                     sync_nodes_focus();
+                    return true;
+                }
+            }
+            if (focus_region == FocusRegion::TopLeftView &&
+                left_view_mode == LeftViewMode::ElementsList &&
+                !elem_rows.empty()) {
+                const int max_idx = static_cast<int>(elem_rows.size()) - 1;
+                if (m.button == Mouse::WheelUp) {
+                    elem_selected_row = (std::max)(0, elem_selected_row - 3);
+                    sync_elems_focus();
+                    return true;
+                }
+                if (m.button == Mouse::WheelDown) {
+                    elem_selected_row = (std::min)(max_idx, elem_selected_row + 3);
+                    sync_elems_focus();
                     return true;
                 }
             }
