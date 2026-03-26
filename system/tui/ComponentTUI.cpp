@@ -798,6 +798,54 @@ void run_app_tui(AppSession& session) {
     std::vector<ElemListRow> elem_rows;
     int elem_selected_row = -1;
 
+    auto open_panel_in_top_view = [&](const std::string& type, const std::string& id_or_name) -> bool {
+        PanelEntityKind kind = PanelEntityKind::Unknown;
+        std::string display_id;
+        entt::entity e = resolve_panel_entity(
+            session.data.registry, &session.inspector, type, id_or_name, &kind, &display_id);
+        if (e == entt::null) {
+            spdlog::error("Panel: entity not found. Ensure mesh is loaded and index built.");
+            return false;
+        }
+
+        // Build the same document structure as render_panel(), but keep it inside the TUI top area.
+        const char* kind_str = "Entity";
+        switch (kind) {
+            case PanelEntityKind::Node:    kind_str = "Node";    break;
+            case PanelEntityKind::Element: kind_str = "Element"; break;
+            case PanelEntityKind::Part:    kind_str = "Part";    break;
+            case PanelEntityKind::Set:     kind_str = "Set";     break;
+            default: break;
+        }
+
+        Elements component_views;
+        for (const auto& entry : ComponentTUIRegistry::instance().entries()) {
+            if (entry.has_component(session.data.registry, e)) {
+                component_views.push_back(
+                    window(text(entry.display_name) | bold, entry.render(session.data.registry, e, &session.inspector)));
+            }
+        }
+        if (kind == PanelEntityKind::Node) {
+            component_views.push_back(window(text("Force path") | bold,
+                force_path_element(session.data.registry, e, &session.inspector)));
+        }
+
+        top_view = vbox({
+            hbox({
+                text(" NovaFEA ") | bgcolor(Color::Blue) | color(Color::White) | bold,
+                text(" Universal Inspector ") | color(Color::Cyan),
+                filler(),
+                text(std::string(kind_str) + " " + display_id) | dim,
+            }) | border,
+            vbox(std::move(component_views)),
+            text("Tip: type another command below. Use 'help' for quick help.") | dim,
+        });
+        left_view_mode = LeftViewMode::StaticElement;
+        left_focus = 0.0f;
+        focus_region = FocusRegion::TopLeftView;
+        return true;
+    };
+
     auto sync_nodes_focus = [&]() {
         if (node_rows.empty() || node_selected_row < 0) {
             left_focus = 0.0f;
@@ -849,7 +897,7 @@ void run_app_tui(AppSession& session) {
                 text("Count: " + std::to_string(elem_rows.size())) | dim
             }) | border,
             vbox(std::move(lines)),
-            text("Scroll: wheel / ↑↓ / PgUp PgDn   Tip: use 'panel elem <eid>' for details.") | dim,
+            text("Scroll: wheel / ↑↓ / PgUp PgDn   Enter: panel   Tip: use 'panel elem <eid>' for details.") | dim,
         });
     };
 
@@ -893,7 +941,7 @@ void run_app_tui(AppSession& session) {
                 text("Count: " + std::to_string(node_rows.size())) | dim
             }) | border,
             vbox(std::move(lines)),
-            text("Scroll: wheel / ↑↓ / PgUp PgDn   Tip: use 'panel node <nid>' for details.") | dim,
+            text("Scroll: wheel / ↑↓ / PgUp PgDn   Enter: panel   Tip: use 'panel node <nid>' for details.") | dim,
         });
     };
 
@@ -965,6 +1013,16 @@ void run_app_tui(AppSession& session) {
         }
 
         if (event == Event::Return) {
+            if (focus_region == FocusRegion::TopLeftView) {
+                if (left_view_mode == LeftViewMode::NodesList && !node_rows.empty() &&
+                    node_selected_row >= 0 && node_selected_row < static_cast<int>(node_rows.size())) {
+                    (void)open_panel_in_top_view("node", std::to_string(node_rows[static_cast<std::size_t>(node_selected_row)].nid));
+                } else if (left_view_mode == LeftViewMode::ElementsList && !elem_rows.empty() &&
+                    elem_selected_row >= 0 && elem_selected_row < static_cast<int>(elem_rows.size())) {
+                    (void)open_panel_in_top_view("elem", std::to_string(elem_rows[static_cast<std::size_t>(elem_selected_row)].eid));
+                }
+                return true;
+            }
             if (focus_region != FocusRegion::BottomCommand) {
                 return true;
             }
@@ -1070,51 +1128,7 @@ void run_app_tui(AppSession& session) {
                     spdlog::error("Usage: panel <type> <id_or_name>  (type: node|elem|element|part|set)");
                     return true;
                 }
-
-                PanelEntityKind kind = PanelEntityKind::Unknown;
-                std::string display_id;
-                entt::entity e = resolve_panel_entity(
-                    session.data.registry, &session.inspector, type, id_or_name, &kind, &display_id);
-                if (e == entt::null) {
-                    spdlog::error("Panel: entity not found. Ensure mesh is loaded and index built.");
-                    return true;
-                }
-
-                // Build the same document structure as render_panel(), but keep it inside the TUI top area.
-                const char* kind_str = "Entity";
-                switch (kind) {
-                    case PanelEntityKind::Node:    kind_str = "Node";    break;
-                    case PanelEntityKind::Element: kind_str = "Element"; break;
-                    case PanelEntityKind::Part:    kind_str = "Part";    break;
-                    case PanelEntityKind::Set:     kind_str = "Set";     break;
-                    default: break;
-                }
-
-                Elements component_views;
-                for (const auto& entry : ComponentTUIRegistry::instance().entries()) {
-                    if (entry.has_component(session.data.registry, e)) {
-                        component_views.push_back(
-                            window(text(entry.display_name) | bold, entry.render(session.data.registry, e, &session.inspector)));
-                    }
-                }
-                if (kind == PanelEntityKind::Node) {
-                    component_views.push_back(window(text("Force path") | bold,
-                        force_path_element(session.data.registry, e, &session.inspector)));
-                }
-
-                top_view = vbox({
-                    hbox({
-                        text(" NovaFEA ") | bgcolor(Color::Blue) | color(Color::White) | bold,
-                        text(" Universal Inspector ") | color(Color::Cyan),
-                        filler(),
-                        text(std::string(kind_str) + " " + display_id) | dim,
-                    }) | border,
-                    vbox(std::move(component_views)),
-                    text("Tip: type another command below. Use 'help' for quick help.") | dim,
-                });
-                left_view_mode = LeftViewMode::StaticElement;
-                left_focus = 0.0f;
-                focus_region = FocusRegion::TopLeftView;
+                (void)open_panel_in_top_view(type, id_or_name);
                 return true;
             }
 
