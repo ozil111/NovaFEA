@@ -37,7 +37,7 @@ struct AppSession {
         
         // Clear all entities and components
         data.clear();
-        inspector.clear(); // 清空缓存
+        inspector.clear(); // Clear cache
         mesh_loaded = false;
         topology_built = false;
     }
