@@ -67,6 +67,12 @@ void render_nodes_list(entt::registry& reg);
 /** Render a simple element list view (ElementID + ElementType + Connectivity) to stdout. */
 void render_elements_list(entt::registry& reg);
 
+/**
+ * Render element list and return selected ElementID.
+ * Returns -1 when the user quits without selecting.
+ */
+int render_elements_list_select(entt::registry& reg);
+
 /** Force-path insight element for a node (PartGraph edges, load/constraint). Returns empty element if none. */
 Element force_path_element(entt::registry& reg, entt::entity node_entity, SimdroidInspector* insp);
 

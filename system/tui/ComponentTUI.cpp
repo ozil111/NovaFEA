@@ -541,6 +541,10 @@ void render_nodes_list(entt::registry& reg) {
 }
 
 void render_elements_list(entt::registry& reg) {
+    (void)render_elements_list_select(reg);
+}
+
+int render_elements_list_select(entt::registry& reg) {
     struct Row {
         int eid;
         int type_id;
@@ -574,6 +578,7 @@ void render_elements_list(entt::registry& reg) {
     std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.eid < b.eid; });
 
     int selected_row = rows.empty() ? -1 : 0;
+    int selected_eid = -1;
     auto screen = ScreenInteractive::Fullscreen();
 
     ftxui::Component ui = ftxui::Renderer([&] {
@@ -617,7 +622,7 @@ void render_elements_list(entt::registry& reg) {
             | yframe
             | vscroll_indicator
             | flex;
-        Element footer = text("Scroll: wheel / ↑↓ / PgUp PgDn   Quit: Enter or Q") | dim;
+        Element footer = text("Scroll: wheel / ↑↓ / PgUp PgDn   Select: Enter   Quit: Q / Esc") | dim;
 
         return vbox({ header, body, footer }) | border;
     });
@@ -653,13 +658,20 @@ void render_elements_list(entt::registry& reg) {
                 }
             }
         }
-        if (event == Event::Return || event == Event::Character('q') || event == Event::Character('Q')) {
+        if (event == Event::Return) {
+            if (!rows.empty() && selected_row >= 0 && selected_row < static_cast<int>(rows.size()))
+                selected_eid = rows[static_cast<std::size_t>(selected_row)].eid;
+            screen.Exit();
+            return true;
+        }
+        if (event == Event::Escape || event == Event::Character('q') || event == Event::Character('Q')) {
             screen.Exit();
             return true;
         }
         return false;
     });
     screen.Loop(ui);
+    return selected_eid;
 }
 
 namespace {
@@ -669,6 +681,33 @@ Element status_lines_element(const std::vector<std::string>& lines) {
     els.reserve(lines.size());
     for (const auto& s : lines) {
         els.push_back(paragraph(s));
+    }
+    return vbox(std::move(els));
+}
+
+struct TuiLogLine {
+    spdlog::level::level_enum level;
+    std::string text;
+};
+
+Decorator level_decorator(spdlog::level::level_enum lvl) {
+    using spdlog::level::level_enum;
+    switch (lvl) {
+        case level_enum::trace:    return dim;
+        case level_enum::debug:    return color(Color::GrayDark);
+        case level_enum::info:     return color(Color::GreenLight);
+        case level_enum::warn:     return color(Color::YellowLight);
+        case level_enum::err:      return color(Color::RedLight);
+        case level_enum::critical: return color(Color::RedLight) | bold;
+        default:                   return nothing;
+    }
+}
+
+Element status_lines_element(const std::vector<TuiLogLine>& lines) {
+    Elements els;
+    els.reserve(lines.size());
+    for (const auto& s : lines) {
+        els.push_back(paragraph(s.text) | level_decorator(s.level));
     }
     return vbox(std::move(els));
 }
@@ -684,7 +723,7 @@ float clamp01(float v) {
 }
 
 std::mutex g_tui_log_mutex;
-std::deque<std::string> g_tui_log_lines;
+std::deque<TuiLogLine> g_tui_log_lines;
 std::shared_ptr<spdlog::sinks::sink> g_tui_log_sink;
 
 class TuiLogSink final : public spdlog::sinks::base_sink<std::mutex> {
@@ -699,7 +738,7 @@ protected:
         if (line.empty()) return;
 
         std::lock_guard<std::mutex> lock(g_tui_log_mutex);
-        g_tui_log_lines.push_back(std::move(line));
+        g_tui_log_lines.push_back(TuiLogLine{ msg.level, std::move(line) });
         if (g_tui_log_lines.size() > 1000) {
             g_tui_log_lines.erase(g_tui_log_lines.begin(), g_tui_log_lines.begin() + 200);
         }
@@ -708,9 +747,9 @@ protected:
     void flush_() override {}
 };
 
-std::vector<std::string> tui_log_lines_snapshot() {
+std::vector<TuiLogLine> tui_log_lines_snapshot() {
     std::lock_guard<std::mutex> lock(g_tui_log_mutex);
-    return std::vector<std::string>(g_tui_log_lines.begin(), g_tui_log_lines.end());
+    return std::vector<TuiLogLine>(g_tui_log_lines.begin(), g_tui_log_lines.end());
 }
 
 enum class FocusRegion {
@@ -820,7 +859,7 @@ void run_app_tui(AppSession& session) {
         const bool left_focused = focus_region == FocusRegion::TopLeftView;
         const bool right_focused = focus_region == FocusRegion::TopRightOutput;
         const bool command_focused = focus_region == FocusRegion::BottomCommand;
-        const std::vector<std::string> log_lines = tui_log_lines_snapshot();
+        const std::vector<TuiLogLine> log_lines = tui_log_lines_snapshot();
 
         Element left_box =
             window(
@@ -1157,6 +1196,20 @@ void run_app_tui(AppSession& session) {
             if (focus_region == FocusRegion::TopRightOutput && m.button == Mouse::WheelDown) {
                 right_focus = clamp01(right_focus + 0.06f);
                 return true;
+            }
+
+            // Mouse-wheel scroll for Output pane when hovering it (no TAB required).
+            if (m.button == Mouse::WheelUp || m.button == Mouse::WheelDown) {
+                const int dimx = screen.dimx();
+                const int dimy = screen.dimy();
+                const int output_width = 56;
+                const int output_left = (std::max)(0, dimx - output_width - 1);
+                const int top_area_bottom = (std::max)(0, dimy - 3); // command box is ~3 lines tall
+                const bool over_output = (m.x >= output_left) && (m.y >= 0) && (m.y < top_area_bottom);
+                if (over_output) {
+                    right_focus = clamp01(right_focus + (m.button == Mouse::WheelUp ? -0.06f : 0.06f));
+                    return true;
+                }
             }
         }
         return false;

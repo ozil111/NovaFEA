@@ -919,49 +919,10 @@ void process_command(const std::string& command_line, AppSession& session) {
         tui::render_nodes_list(registry);
     }
     else if (command == "list_elements") {
-        std::string mode;
-        ss >> mode;
         auto& registry = session.data.registry;
-        if (mode == "tui") {
-            tui::render_elements_list(registry);
-            return;
-        }
-
-        // Default: plain text listing to log
-        struct Row {
-            int eid;
-            int type_id;
-            std::vector<int> node_ids;
-        };
-
-        std::vector<Row> rows;
-        auto view = registry.view<const Component::ElementID, const Component::ElementType, const Component::Connectivity>();
-        rows.reserve(view.size_hint());
-        for (auto e : view) {
-            const int eid = view.get<const Component::ElementID>(e).value;
-            const int type_id = view.get<const Component::ElementType>(e).type_id;
-            const auto& conn = view.get<const Component::Connectivity>(e);
-
-            std::vector<int> nids;
-            nids.reserve(conn.nodes.size());
-            for (auto ne : conn.nodes) {
-                if (!registry.valid(ne) || !registry.all_of<Component::NodeID>(ne)) continue;
-                nids.push_back(registry.get<Component::NodeID>(ne).value);
-            }
-
-            rows.push_back(Row{ eid, type_id, std::move(nids) });
-        }
-
-        std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.eid < b.eid; });
-
-        spdlog::info("Elements: {}", rows.size());
-        for (const auto& r : rows) {
-            std::string nodes_str;
-            for (std::size_t i = 0; i < r.node_ids.size(); ++i) {
-                if (i > 0) nodes_str += ", ";
-                nodes_str += std::to_string(r.node_ids[i]);
-            }
-            spdlog::info("  eid={} type_id={} nodes=[{}]", r.eid, r.type_id, nodes_str);
+        const int selected_eid = tui::render_elements_list_select(registry);
+        if (selected_eid >= 0) {
+            session.inspector.inspect_element(registry, selected_eid);
         }
     }
     else if (command == "node") {
