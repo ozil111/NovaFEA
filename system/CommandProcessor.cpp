@@ -69,6 +69,15 @@ int allocate_next_node_id(entt::registry& registry) {
     return max_id + 1;
 }
 
+int allocate_next_element_id(entt::registry& registry) {
+    int max_id = 0;
+    auto view = registry.view<const Component::ElementID>();
+    for (auto e : view) {
+        max_id = std::max(max_id, view.get<const Component::ElementID>(e).value);
+    }
+    return max_id + 1;
+}
+
 entt::entity get_or_create_set_entity(entt::registry& registry, const std::string& name) {
     entt::entity e = find_set_by_name(registry, name);
     if (e != entt::null) return e;
@@ -77,7 +86,7 @@ entt::entity get_or_create_set_entity(entt::registry& registry, const std::strin
     return e;
 }
 
-int infer_element_type_from_node_count(std::size_t count) {
+[[maybe_unused]] int infer_element_type_from_node_count(std::size_t count) {
     if (count == 2) return 102;   // Line2
     if (count == 3) return 203;   // Tri3
     if (count == 4) return 304;   // Tet4 / Quad4, default to volume element
@@ -118,6 +127,7 @@ void process_command(const std::string& command_line, AppSession& session) {
                      "panel node <nid>, panel elem <eid>, panel part <name>, panel set <name>, "
                      "node, list_nodes, node_add, node_move, node_delete, "
                      "elem, elem_add, elem_delete, "
+                     "list_elements, "
                      "list_sets, set_info, set_addnode, set_addelem, set_removenode, set_removeelem, "
                      "save, help, quit");
     }
@@ -585,9 +595,13 @@ void process_command(const std::string& command_line, AppSession& session) {
         rebuild_inspector_if_mesh_loaded(session);
     }
     else if (command == "elem_add") {
-        int eid;
-        if (!(ss >> eid)) {
-            spdlog::error("Usage: elem_add <eid> <nid1> <nid2> ...");
+        int type_id;
+        if (!(ss >> type_id)) {
+            spdlog::error("Usage: elem_add <typeid> <nid1> <nid2> ...");
+            return;
+        }
+        if (type_id <= 0) {
+            spdlog::error("elem_add requires a positive typeid.");
             return;
         }
         std::vector<int> node_ids;
@@ -599,10 +613,7 @@ void process_command(const std::string& command_line, AppSession& session) {
             return;
         }
         auto& registry = session.data.registry;
-        if (find_element_by_id(registry, eid) != entt::null) {
-            spdlog::error("Element {} already exists.", eid);
-            return;
-        }
+        int eid = allocate_next_element_id(registry);
         std::vector<entt::entity> node_entities;
         node_entities.reserve(node_ids.size());
         for (int nid : node_ids) {
@@ -612,11 +623,6 @@ void process_command(const std::string& command_line, AppSession& session) {
                 return;
             }
             node_entities.push_back(ne);
-        }
-        int type_id = infer_element_type_from_node_count(node_entities.size());
-        if (type_id == 0) {
-            spdlog::error("Unsupported element node count {} in elem_add.", node_entities.size());
-            return;
         }
         auto e = registry.create();
         registry.emplace<Component::ElementID>(e, eid);
@@ -935,6 +941,52 @@ void process_command(const std::string& command_line, AppSession& session) {
         spdlog::info("Nodes: {}", rows.size());
         for (const auto& r : rows) {
             spdlog::info("  nid={} pos=({:.6f}, {:.6f}, {:.6f})", r.nid, r.x, r.y, r.z);
+        }
+    }
+    else if (command == "list_elements") {
+        std::string mode;
+        ss >> mode;
+        auto& registry = session.data.registry;
+        if (mode == "tui") {
+            tui::render_elements_list(registry);
+            return;
+        }
+
+        // Default: plain text listing to log
+        struct Row {
+            int eid;
+            int type_id;
+            std::vector<int> node_ids;
+        };
+
+        std::vector<Row> rows;
+        auto view = registry.view<const Component::ElementID, const Component::ElementType, const Component::Connectivity>();
+        rows.reserve(view.size_hint());
+        for (auto e : view) {
+            const int eid = view.get<const Component::ElementID>(e).value;
+            const int type_id = view.get<const Component::ElementType>(e).type_id;
+            const auto& conn = view.get<const Component::Connectivity>(e);
+
+            std::vector<int> nids;
+            nids.reserve(conn.nodes.size());
+            for (auto ne : conn.nodes) {
+                if (!registry.valid(ne) || !registry.all_of<Component::NodeID>(ne)) continue;
+                nids.push_back(registry.get<Component::NodeID>(ne).value);
+            }
+
+            rows.push_back(Row{ eid, type_id, std::move(nids) });
+        }
+
+        std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.eid < b.eid; });
+
+        spdlog::info("Elements: {}", rows.size());
+        for (const auto& r : rows) {
+            std::string nodes_str;
+            for (std::size_t i = 0; i < r.node_ids.size(); ++i) {
+                if (i > 0) nodes_str += ", ";
+                nodes_str += std::to_string(r.node_ids[i]);
+            }
+            spdlog::info("  eid={} type_id={} nodes=[{}]", r.eid, r.type_id, nodes_str);
         }
     }
     else if (command == "node") {

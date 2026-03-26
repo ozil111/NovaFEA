@@ -532,4 +532,126 @@ void render_nodes_list(entt::registry& reg) {
     screen.Loop(ui);
 }
 
+void render_elements_list(entt::registry& reg) {
+    struct Row {
+        int eid;
+        int type_id;
+        std::string nodes;
+    };
+    std::vector<Row> rows;
+    auto view = reg.view<const ::Component::ElementID, const ::Component::ElementType, const ::Component::Connectivity>();
+    rows.reserve(view.size_hint());
+    for (auto e : view) {
+        const int eid = view.get<const ::Component::ElementID>(e).value;
+        const int type_id = view.get<const ::Component::ElementType>(e).type_id;
+        const auto& conn = view.get<const ::Component::Connectivity>(e);
+
+        std::vector<int> nids;
+        nids.reserve(conn.nodes.size());
+        for (auto ne : conn.nodes) {
+            if (!reg.valid(ne) || !reg.all_of<::Component::NodeID>(ne)) continue;
+            nids.push_back(reg.get<::Component::NodeID>(ne).value);
+        }
+
+        std::string nodes_str;
+        const std::size_t show_n = (std::min<std::size_t>)(nids.size(), 8);
+        for (std::size_t i = 0; i < show_n; ++i) {
+            if (i > 0) nodes_str += ", ";
+            nodes_str += std::to_string(nids[i]);
+        }
+        if (nids.size() > show_n) nodes_str += " ...";
+
+        rows.push_back(Row{ eid, type_id, std::move(nodes_str) });
+    }
+    std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.eid < b.eid; });
+
+    int selected_row = rows.empty() ? -1 : 0;
+    auto screen = ScreenInteractive::Fullscreen();
+
+    ftxui::Component ui = ftxui::Renderer([&] {
+        Elements lines;
+        lines.push_back(
+            hbox({
+                text(" ElementID ") | bold,
+                text(" | "),
+                text(" TypeID ") | bold,
+                text(" | "),
+                text(" Nodes ") | bold,
+            }) | border);
+
+        for (size_t i = 0; i < rows.size(); ++i) {
+            const auto& r = rows[i];
+
+            Element row = hbox({
+                text(" " + std::to_string(r.eid) + " ") | color(Color::Cyan),
+                text(" | "),
+                text(" " + std::to_string(r.type_id) + " ") | color(Color::YellowLight),
+                text(" | "),
+                text(" " + r.nodes + " "),
+            }) | border;
+
+            if (static_cast<int>(i) == selected_row)
+                row = row | inverted;
+            lines.push_back(std::move(row));
+        }
+
+        Element header = hbox({
+            text(" NovaFEA ") | bgcolor(Color::Blue) | color(Color::White) | bold,
+            text(" Elements ") | color(Color::Cyan),
+            filler(),
+            text("Count: " + std::to_string(rows.size())) | dim
+        }) | border;
+
+        const float focus_y =
+            rows.empty() ? 0.0f : static_cast<float>(selected_row + 1) / static_cast<float>(rows.size() + 1);
+        Element body = vbox(std::move(lines))
+            | focusPositionRelative(0.0f, focus_y)
+            | yframe
+            | vscroll_indicator
+            | flex;
+        Element footer = text("Scroll: wheel / ↑↓ / PgUp PgDn   Quit: Enter or Q") | dim;
+
+        return vbox({ header, body, footer }) | border;
+    });
+
+    ui = ftxui::CatchEvent(ui, [&](Event event) {
+        if (!rows.empty()) {
+            const int max_idx = static_cast<int>(rows.size()) - 1;
+            if (event == Event::ArrowUp) {
+                selected_row = (std::max)(0, selected_row - 1);
+                return true;
+            }
+            if (event == Event::ArrowDown) {
+                selected_row = (std::min)(max_idx, selected_row + 1);
+                return true;
+            }
+            if (event == Event::PageUp) {
+                selected_row = (std::max)(0, selected_row - 10);
+                return true;
+            }
+            if (event == Event::PageDown) {
+                selected_row = (std::min)(max_idx, selected_row + 10);
+                return true;
+            }
+            if (event.is_mouse()) {
+                const auto& m = event.mouse();
+                if (m.button == Mouse::WheelUp) {
+                    selected_row = (std::max)(0, selected_row - 3);
+                    return true;
+                }
+                if (m.button == Mouse::WheelDown) {
+                    selected_row = (std::min)(max_idx, selected_row + 3);
+                    return true;
+                }
+            }
+        }
+        if (event == Event::Return || event == Event::Character('q') || event == Event::Character('Q')) {
+            screen.Exit();
+            return true;
+        }
+        return false;
+    });
+    screen.Loop(ui);
+}
+
 } // namespace tui
