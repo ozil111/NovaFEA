@@ -14,29 +14,16 @@
 #include "DataContext.h"                  // Introduce ECS data center
 #include "components/mesh_components.h"   // Introduce component definitions
 #include "components/analysis_component.h"
-#include "TopologyData.h"                 // Introduce topological data structures
-#include "mesh/TopologySystems.h"         // Introduce topological logic systems
 #include "AppSession.h"                   // Introduce session state machine
-#include "dof/DofNumberingSystem.h"      // DOF mapping system
-#include "mass/MassSystem.h"             // Mass system
-#include "force/InternalForceSystem.h"   // Internal force system
-#include "load/LoadSystem.h"             // Load system
-#include "explicit/ExplicitSolver.h"     // Explicit solver
-#include "material/mat1/LinearElasticMatrixSystem.h"  // Material matrix system
-#include "parser_simdroid/SimdroidParser.h" // Simdroid parser
-#include "exporter_simdroid/SimdroidExporter.h" // Simdroid exporter
-#include "analysis/GraphBuilder.h"
-#include "analysis/MermaidReporter.h"
 #include "output/VtuExporter.h"          // VTU result output
 #include "main0_explicit.h"              // Explicit solver logic
 #include "main0_linearstatic.h"          // Linear static solver logic
-#include "CommandProcessor.h"            // Command processor
+#include "tui/ComponentTUI.h"
 #include <iostream>
 #include <string>
 #include <memory>
 #include <vector>
 #include <filesystem>
-#include <sstream>
 #include <cstdlib>
 
 // Function to print the startup banner
@@ -81,10 +68,7 @@ void print_help() {
 // --- Introduce interactive mode command processor ---
 
 int main(int argc, char* argv[]) {
-    // --- Step 1: Print the banner first ---
-    print_banner();
-
-    // --- Step 2: Proceed with your original argument parsing and logger setup ---
+    // --- Step 1: Proceed with argument parsing and logger setup ---
     
     // Default log level is info
     spdlog::level::level_enum log_level = spdlog::level::info;
@@ -219,6 +203,8 @@ int main(int argc, char* argv[]) {
     // --- Step 4: Mode decision ---
     // Decide which mode to enter based on whether --input-file is provided
     if (!input_file_path.empty()) {
+        // Banner is meaningful in batch mode output.
+        print_banner();
         // --- BATCH MODE EXECUTION ---
         spdlog::info("Running in Batch Mode.");
         spdlog::info("Processing input file: {}", input_file_path);
@@ -293,25 +279,13 @@ int main(int argc, char* argv[]) {
             return 1;
         }
     } else {
+        // In interactive mode we start the FTXUI TUI; banner is shown inside the TUI.
         // --- INTERACTIVE MODE EXECUTION ---
+        tui::install_tui_log_sink();
         spdlog::info("No input file specified. Running in Interactive Mode.");
-        spdlog::info("Type 'help' for a list of commands, 'quit' or 'exit' to leave.");
         
         AppSession session;
-        std::string command_line;
-        
-        while (session.is_running) {
-            std::cout << "NovaFEA> " << std::flush;
-            if (std::getline(std::cin, command_line)) {
-                if (!command_line.empty()) {
-                    process_command(command_line, session);
-                }
-            } else {
-                // Handle Ctrl+D (Unix) or Ctrl+Z (Windows) to end input
-                session.is_running = false;
-                std::cout << std::endl; // Add newline to keep terminal clean
-            }
-        }
+        tui::run_app_tui(session);
     }
     
     spdlog::info("Application finished successfully.");

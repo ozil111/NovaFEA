@@ -915,33 +915,8 @@ void process_command(const std::string& command_line, AppSession& session) {
         spdlog::info("set_removeelem '{}' : removed {} entries.", set_name, removed);
     }
     else if (command == "list_nodes") {
-        std::string mode;
-        ss >> mode;
         auto& registry = session.data.registry;
-        if (mode == "tui") {
-            tui::render_nodes_list(registry);
-            return;
-        }
-
-        // Default: plain text listing to log
-        struct Row {
-            int nid;
-            double x, y, z;
-        };
-        std::vector<Row> rows;
-        auto view = registry.view<const Component::NodeID, const Component::Position>();
-        rows.reserve(view.size_hint());
-        for (auto e : view) {
-            const auto& id = view.get<const Component::NodeID>(e);
-            const auto& p = view.get<const Component::Position>(e);
-            rows.push_back(Row{ id.value, p.x, p.y, p.z });
-        }
-        std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.nid < b.nid; });
-
-        spdlog::info("Nodes: {}", rows.size());
-        for (const auto& r : rows) {
-            spdlog::info("  nid={} pos=({:.6f}, {:.6f}, {:.6f})", r.nid, r.x, r.y, r.z);
-        }
+        tui::render_nodes_list(registry);
     }
     else if (command == "list_elements") {
         std::string mode;

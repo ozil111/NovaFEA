@@ -9,12 +9,20 @@
 #include "components/simdroid_components.h"
 #include "PartGraph.h"
 #include "analysis/GraphBuilder.h"
+#include "AppSession.h"
+#include "CommandProcessor.h"
+#include "spdlog/spdlog.h"
+#include "spdlog/sinks/base_sink.h"
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/node.hpp>
 #include <ftxui/screen/screen.hpp>
+#include <optional>
 #include <algorithm>
+#include <deque>
 #include <iomanip>
+#include <memory>
+#include <mutex>
 #include <sstream>
 
 namespace tui {
@@ -651,6 +659,510 @@ void render_elements_list(entt::registry& reg) {
         }
         return false;
     });
+    screen.Loop(ui);
+}
+
+namespace {
+
+Element status_lines_element(const std::vector<std::string>& lines) {
+    Elements els;
+    els.reserve(lines.size());
+    for (const auto& s : lines) {
+        els.push_back(paragraph(s));
+    }
+    return vbox(std::move(els));
+}
+
+bool starts_with(const std::string& s, const std::string& prefix) {
+    return s.size() >= prefix.size() && std::equal(prefix.begin(), prefix.end(), s.begin());
+}
+
+float clamp01(float v) {
+    if (v < 0.0f) return 0.0f;
+    if (v > 1.0f) return 1.0f;
+    return v;
+}
+
+std::mutex g_tui_log_mutex;
+std::deque<std::string> g_tui_log_lines;
+std::shared_ptr<spdlog::sinks::sink> g_tui_log_sink;
+
+class TuiLogSink final : public spdlog::sinks::base_sink<std::mutex> {
+protected:
+    void sink_it_(const spdlog::details::log_msg& msg) override {
+        spdlog::memory_buf_t formatted;
+        formatter_->format(msg, formatted);
+        std::string line = fmt::to_string(formatted);
+        while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
+            line.pop_back();
+        }
+        if (line.empty()) return;
+
+        std::lock_guard<std::mutex> lock(g_tui_log_mutex);
+        g_tui_log_lines.push_back(std::move(line));
+        if (g_tui_log_lines.size() > 1000) {
+            g_tui_log_lines.erase(g_tui_log_lines.begin(), g_tui_log_lines.begin() + 200);
+        }
+    }
+
+    void flush_() override {}
+};
+
+std::vector<std::string> tui_log_lines_snapshot() {
+    std::lock_guard<std::mutex> lock(g_tui_log_mutex);
+    return std::vector<std::string>(g_tui_log_lines.begin(), g_tui_log_lines.end());
+}
+
+enum class FocusRegion {
+    TopLeftView = 0,
+    TopRightOutput = 1,
+    BottomCommand = 2,
+};
+
+} // namespace
+
+void install_tui_log_sink() {
+    if (g_tui_log_sink) return;
+    auto logger = spdlog::default_logger();
+    if (!logger) return;
+
+    auto sink = std::make_shared<TuiLogSink>();
+    logger->sinks().push_back(sink);
+    g_tui_log_sink = std::move(sink);
+}
+
+void run_app_tui(AppSession& session) {
+    using namespace ftxui;
+
+    auto screen = ScreenInteractive::Fullscreen();
+
+    std::string input;
+    // top_view: if set, overrides status line view (e.g. panel/list render).
+    std::optional<Element> top_view;
+    float left_focus = 0.0f;
+    float right_focus = 0.0f;
+    FocusRegion focus_region = FocusRegion::BottomCommand;
+    enum class LeftViewMode { None, StaticElement, NodesList };
+    LeftViewMode left_view_mode = LeftViewMode::None;
+    struct NodeListRow {
+        int nid;
+        double x, y, z;
+    };
+    std::vector<NodeListRow> node_rows;
+    int node_selected_row = -1;
+
+    auto sync_nodes_focus = [&]() {
+        if (node_rows.empty() || node_selected_row < 0) {
+            left_focus = 0.0f;
+            return;
+        }
+        left_focus = clamp01(
+            static_cast<float>(node_selected_row + 1) /
+            static_cast<float>(node_rows.size() + 1));
+    };
+
+    auto render_nodes_list_element = [&]() -> Element {
+        Elements lines;
+        lines.push_back(
+            hbox({
+                text(" NodeID ") | bold, text(" | "),
+                text(" X ") | bold,     text(" | "),
+                text(" Y ") | bold,     text(" | "),
+                text(" Z ") | bold,
+            }) | border);
+
+        for (size_t i = 0; i < node_rows.size(); ++i) {
+            const auto& r = node_rows[i];
+            std::ostringstream sx, sy, sz;
+            sx.setf(std::ios::fixed); sy.setf(std::ios::fixed); sz.setf(std::ios::fixed);
+            sx << std::setprecision(6) << r.x;
+            sy << std::setprecision(6) << r.y;
+            sz << std::setprecision(6) << r.z;
+            Element row = hbox({
+                text(" " + std::to_string(r.nid) + " ") | color(Color::Cyan),
+                text(" | "),
+                text(" " + sx.str() + " "),
+                text(" | "),
+                text(" " + sy.str() + " "),
+                text(" | "),
+                text(" " + sz.str() + " "),
+            }) | border;
+            if (static_cast<int>(i) == node_selected_row) {
+                row = row | inverted;
+            }
+            lines.push_back(std::move(row));
+        }
+
+        return vbox({
+            hbox({
+                text(" NovaFEA ") | bgcolor(Color::Blue) | color(Color::White) | bold,
+                text(" Nodes ") | color(Color::Cyan),
+                filler(),
+                text("Count: " + std::to_string(node_rows.size())) | dim
+            }) | border,
+            vbox(std::move(lines)),
+            text("Scroll: wheel / ↑↓ / PgUp PgDn   Tip: use 'panel node <nid>' for details.") | dim,
+        });
+    };
+
+    auto input_component = Input(&input, "command...");
+
+    auto ui = Renderer(input_component, [&] {
+        Element top_left;
+        if (left_view_mode == LeftViewMode::NodesList) {
+            top_left = render_nodes_list_element();
+        } else if (top_view.has_value()) {
+            top_left = top_view.value();
+        } else {
+            top_left = text("No active TUI view. Try: list_nodes, list_elements, panel ...") | dim;
+        }
+
+        const bool left_focused = focus_region == FocusRegion::TopLeftView;
+        const bool right_focused = focus_region == FocusRegion::TopRightOutput;
+        const bool command_focused = focus_region == FocusRegion::BottomCommand;
+        const std::vector<std::string> log_lines = tui_log_lines_snapshot();
+
+        Element left_box =
+            window(
+                text(left_focused ? " TUI View [TAB] " : " TUI View ") | bold,
+                top_left
+                    | focusPositionRelative(0.0f, left_focus)
+                    | yframe
+                    | vscroll_indicator
+                    | flex);
+
+        Element right_box =
+            window(
+                text(right_focused ? " Output [TAB] " : " Output ") | bold,
+                status_lines_element(log_lines)
+                    | focusPositionRelative(0.0f, right_focus)
+                    | yframe
+                    | vscroll_indicator
+                    | flex);
+
+        Element top_row = hbox({
+            left_box | flex,
+            right_box | size(WIDTH, EQUAL, 56),
+        }) | flex;
+
+        Element bottom_box =
+            window(
+                text(command_focused ? " Command [TAB] " : " Command ") | bold,
+                hbox({
+                    text("NovaFEA> ") | color(Color::Cyan),
+                    input_component->Render() | flex,
+                }));
+
+        return vbox({
+            top_row | flex,
+            bottom_box,
+        }) | border;
+    });
+
+    ui = CatchEvent(ui, [&](Event event) {
+        if (event == Event::Tab) {
+            const int idx = (static_cast<int>(focus_region) + 1) % 3;
+            focus_region = static_cast<FocusRegion>(idx);
+            return true;
+        }
+
+        if (focus_region != FocusRegion::BottomCommand && event.is_character()) {
+            return true;
+        }
+
+        if (event == Event::Return) {
+            if (focus_region != FocusRegion::BottomCommand) {
+                return true;
+            }
+            const std::string cmd = input;
+            input.clear();
+
+            if (cmd.empty()) return true;
+
+            // Clear the view when a normal command is entered; view commands will set it again.
+            top_view.reset();
+            left_view_mode = LeftViewMode::None;
+            node_rows.clear();
+            node_selected_row = -1;
+
+            if (cmd == "quit" || cmd == "exit") {
+                session.is_running = false;
+                screen.Exit();
+                return true;
+            }
+
+            // Minimal in-TUI help. Full logs are still in spdlog.
+            if (cmd == "help") {
+                std::vector<std::string> help = {
+                    "Commands:",
+                    "  import <file>",
+                    "  info",
+                    "  list_nodes",
+                    "  list_elements",
+                    "  panel node <nid>",
+                    "  panel elem <eid>",
+                    "  panel part <name>",
+                    "  panel set <name>",
+                    "  quit / exit",
+                    "",
+                    "Note: other commands are supported; they will execute and log to the normal logger.",
+                };
+                top_view = window(text(" Help ") | bold, status_lines_element(help));
+                left_view_mode = LeftViewMode::StaticElement;
+                left_focus = 0.0f;
+                focus_region = FocusRegion::TopLeftView;
+                return true;
+            }
+
+            // list_*: render into top.
+            if (cmd == "list_nodes") {
+                auto& reg = session.data.registry;
+                auto view = reg.view<const ::Component::NodeID, const ::Component::Position>();
+                node_rows.clear();
+                node_rows.reserve(view.size_hint());
+                for (auto e : view) {
+                    const auto& id = view.get<const ::Component::NodeID>(e);
+                    const auto& p = view.get<const ::Component::Position>(e);
+                    node_rows.push_back(NodeListRow{ id.value, p.x, p.y, p.z });
+                }
+                std::sort(node_rows.begin(), node_rows.end(), [](const NodeListRow& a, const NodeListRow& b) { return a.nid < b.nid; });
+                node_selected_row = node_rows.empty() ? -1 : 0;
+                left_view_mode = LeftViewMode::NodesList;
+                sync_nodes_focus();
+                focus_region = FocusRegion::TopLeftView;
+                return true;
+            }
+
+            if (cmd == "list_elements") {
+                struct Row { int eid; int type_id; std::string nodes; };
+                std::vector<Row> rows;
+                auto& reg = session.data.registry;
+                auto view = reg.view<const ::Component::ElementID, const ::Component::ElementType, const ::Component::Connectivity>();
+                rows.reserve(view.size_hint());
+                for (auto e : view) {
+                    const int eid = view.get<const ::Component::ElementID>(e).value;
+                    const int type_id = view.get<const ::Component::ElementType>(e).type_id;
+                    const auto& conn = view.get<const ::Component::Connectivity>(e);
+                    std::vector<int> nids;
+                    nids.reserve(conn.nodes.size());
+                    for (auto ne : conn.nodes) {
+                        if (!reg.valid(ne) || !reg.all_of<::Component::NodeID>(ne)) continue;
+                        nids.push_back(reg.get<::Component::NodeID>(ne).value);
+                    }
+                    std::string nodes_str;
+                    const std::size_t show_n = (std::min<std::size_t>)(nids.size(), 8);
+                    for (std::size_t i = 0; i < show_n; ++i) {
+                        if (i > 0) nodes_str += ", ";
+                        nodes_str += std::to_string(nids[i]);
+                    }
+                    if (nids.size() > show_n) nodes_str += " ...";
+                    rows.push_back(Row{ eid, type_id, std::move(nodes_str) });
+                }
+                std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.eid < b.eid; });
+
+                Elements lines;
+                lines.push_back(
+                    hbox({
+                        text(" ElementID ") | bold, text(" | "),
+                        text(" TypeID ") | bold,    text(" | "),
+                        text(" Nodes ") | bold,
+                    }) | border);
+
+                for (const auto& r : rows) {
+                    lines.push_back(
+                        hbox({
+                            text(" " + std::to_string(r.eid) + " ") | color(Color::Cyan),
+                            text(" | "),
+                            text(" " + std::to_string(r.type_id) + " ") | color(Color::YellowLight),
+                            text(" | "),
+                            text(" " + r.nodes + " "),
+                        }) | border);
+                }
+
+                top_view = vbox({
+                    hbox({
+                        text(" NovaFEA ") | bgcolor(Color::Blue) | color(Color::White) | bold,
+                        text(" Elements ") | color(Color::Cyan),
+                        filler(),
+                        text("Count: " + std::to_string(rows.size())) | dim
+                    }) | border,
+                    vbox(std::move(lines)),
+                    text("Tip: use 'panel elem <eid>' for details.") | dim,
+                });
+                left_view_mode = LeftViewMode::StaticElement;
+                left_focus = 0.0f;
+                focus_region = FocusRegion::TopLeftView;
+                return true;
+            }
+
+            // panel: render into top using existing universal inspector panel element composition.
+            if (starts_with(cmd, "panel ")) {
+                std::stringstream ss(cmd);
+                std::string keyword, type, id_or_name;
+                ss >> keyword >> type >> id_or_name;
+                if (type.empty() || id_or_name.empty()) {
+                    spdlog::error("Usage: panel <type> <id_or_name>  (type: node|elem|element|part|set)");
+                    return true;
+                }
+
+                PanelEntityKind kind = PanelEntityKind::Unknown;
+                std::string display_id;
+                entt::entity e = resolve_panel_entity(
+                    session.data.registry, &session.inspector, type, id_or_name, &kind, &display_id);
+                if (e == entt::null) {
+                    spdlog::error("Panel: entity not found. Ensure mesh is loaded and index built.");
+                    return true;
+                }
+
+                // Build the same document structure as render_panel(), but keep it inside the TUI top area.
+                const char* kind_str = "Entity";
+                switch (kind) {
+                    case PanelEntityKind::Node:    kind_str = "Node";    break;
+                    case PanelEntityKind::Element: kind_str = "Element"; break;
+                    case PanelEntityKind::Part:    kind_str = "Part";    break;
+                    case PanelEntityKind::Set:     kind_str = "Set";     break;
+                    default: break;
+                }
+
+                Elements component_views;
+                for (const auto& entry : ComponentTUIRegistry::instance().entries()) {
+                    if (entry.has_component(session.data.registry, e)) {
+                        component_views.push_back(
+                            window(text(entry.display_name) | bold, entry.render(session.data.registry, e, &session.inspector)));
+                    }
+                }
+                if (kind == PanelEntityKind::Node) {
+                    component_views.push_back(window(text("Force path") | bold,
+                        force_path_element(session.data.registry, e, &session.inspector)));
+                }
+
+                top_view = vbox({
+                    hbox({
+                        text(" NovaFEA ") | bgcolor(Color::Blue) | color(Color::White) | bold,
+                        text(" Universal Inspector ") | color(Color::Cyan),
+                        filler(),
+                        text(std::string(kind_str) + " " + display_id) | dim,
+                    }) | border,
+                    vbox(std::move(component_views)),
+                    text("Tip: type another command below. Use 'help' for quick help.") | dim,
+                });
+                left_view_mode = LeftViewMode::StaticElement;
+                left_focus = 0.0f;
+                focus_region = FocusRegion::TopLeftView;
+                return true;
+            }
+
+            // Fallback: execute existing command processor (logs go to spdlog sinks).
+            process_command(cmd, session);
+            return true;
+        }
+
+        // Quick escape for clearing a view.
+        if (event == Event::Escape) {
+            top_view.reset();
+            left_view_mode = LeftViewMode::None;
+            node_rows.clear();
+            node_selected_row = -1;
+            left_focus = 0.0f;
+            return true;
+        }
+
+        if (focus_region == FocusRegion::TopLeftView &&
+            left_view_mode == LeftViewMode::NodesList &&
+            !node_rows.empty()) {
+            const int max_idx = static_cast<int>(node_rows.size()) - 1;
+            if (event == Event::ArrowUp) {
+                node_selected_row = (std::max)(0, node_selected_row - 1);
+                sync_nodes_focus();
+                return true;
+            }
+            if (event == Event::ArrowDown) {
+                node_selected_row = (std::min)(max_idx, node_selected_row + 1);
+                sync_nodes_focus();
+                return true;
+            }
+            if (event == Event::PageUp) {
+                node_selected_row = (std::max)(0, node_selected_row - 10);
+                sync_nodes_focus();
+                return true;
+            }
+            if (event == Event::PageDown) {
+                node_selected_row = (std::min)(max_idx, node_selected_row + 10);
+                sync_nodes_focus();
+                return true;
+            }
+        }
+
+        if (focus_region == FocusRegion::TopLeftView && event == Event::ArrowUp) {
+            left_focus = clamp01(left_focus - 0.03f);
+            return true;
+        }
+        if (focus_region == FocusRegion::TopLeftView && event == Event::ArrowDown) {
+            left_focus = clamp01(left_focus + 0.03f);
+            return true;
+        }
+        if (focus_region == FocusRegion::TopLeftView && event == Event::PageUp) {
+            left_focus = clamp01(left_focus - 0.12f);
+            return true;
+        }
+        if (focus_region == FocusRegion::TopLeftView && event == Event::PageDown) {
+            left_focus = clamp01(left_focus + 0.12f);
+            return true;
+        }
+        if (focus_region == FocusRegion::TopRightOutput && event == Event::ArrowUp) {
+            right_focus = clamp01(right_focus - 0.03f);
+            return true;
+        }
+        if (focus_region == FocusRegion::TopRightOutput && event == Event::ArrowDown) {
+            right_focus = clamp01(right_focus + 0.03f);
+            return true;
+        }
+        if (focus_region == FocusRegion::TopRightOutput && event == Event::PageUp) {
+            right_focus = clamp01(right_focus - 0.12f);
+            return true;
+        }
+        if (focus_region == FocusRegion::TopRightOutput && event == Event::PageDown) {
+            right_focus = clamp01(right_focus + 0.12f);
+            return true;
+        }
+        if (event.is_mouse()) {
+            const auto& m = event.mouse();
+            if (focus_region == FocusRegion::TopLeftView &&
+                left_view_mode == LeftViewMode::NodesList &&
+                !node_rows.empty()) {
+                const int max_idx = static_cast<int>(node_rows.size()) - 1;
+                if (m.button == Mouse::WheelUp) {
+                    node_selected_row = (std::max)(0, node_selected_row - 3);
+                    sync_nodes_focus();
+                    return true;
+                }
+                if (m.button == Mouse::WheelDown) {
+                    node_selected_row = (std::min)(max_idx, node_selected_row + 3);
+                    sync_nodes_focus();
+                    return true;
+                }
+            }
+            if (focus_region == FocusRegion::TopLeftView && m.button == Mouse::WheelUp) {
+                left_focus = clamp01(left_focus - 0.06f);
+                return true;
+            }
+            if (focus_region == FocusRegion::TopLeftView && m.button == Mouse::WheelDown) {
+                left_focus = clamp01(left_focus + 0.06f);
+                return true;
+            }
+            if (focus_region == FocusRegion::TopRightOutput && m.button == Mouse::WheelUp) {
+                right_focus = clamp01(right_focus - 0.06f);
+                return true;
+            }
+            if (focus_region == FocusRegion::TopRightOutput && m.button == Mouse::WheelDown) {
+                right_focus = clamp01(right_focus + 0.06f);
+                return true;
+            }
+        }
+        return false;
+    });
+
+    session.is_running = true;
     screen.Loop(ui);
 }
 

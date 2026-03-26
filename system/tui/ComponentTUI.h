@@ -11,6 +11,7 @@
 #include <vector>
 
 struct SimdroidInspector;
+class AppSession;
 
 namespace tui {
 
@@ -68,5 +69,17 @@ void render_elements_list(entt::registry& reg);
 
 /** Force-path insight element for a node (PartGraph edges, load/constraint). Returns empty element if none. */
 Element force_path_element(entt::registry& reg, entt::entity node_entity, SimdroidInspector* insp);
+
+/**
+ * Start the interactive application TUI.
+ * Layout: top = status/view area, bottom = command line input.
+ */
+void run_app_tui(AppSession& session);
+
+/**
+ * Install a spdlog sink to mirror the original console output into TUI output pane.
+ * Safe to call multiple times.
+ */
+void install_tui_log_sink();
 
 } // namespace tui
