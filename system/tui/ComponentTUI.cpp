@@ -776,6 +776,9 @@ void run_app_tui(AppSession& session) {
     auto screen = ScreenInteractive::Fullscreen();
 
     std::string input;
+    std::vector<std::string> history;
+    int history_index = -1;
+    std::string input_backup;
     // top_view: if set, overrides status line view (e.g. panel/list render).
     std::optional<Element> top_view;
     float left_focus = 0.0f;
@@ -1008,6 +1011,33 @@ void run_app_tui(AppSession& session) {
             return true;
         }
 
+        if (focus_region == FocusRegion::BottomCommand) {
+            const int history_size = static_cast<int>(history.size());
+            if (event == Event::ArrowUp) {
+                if (history_size <= 0) return true;
+                if (history_index == -1) {
+                    input_backup = input;
+                    history_index = history_size - 1;
+                } else {
+                    history_index = (std::max)(0, history_index - 1);
+                }
+                input = history[static_cast<std::size_t>(history_index)];
+                return true;
+            }
+            if (event == Event::ArrowDown) {
+                if (history_size <= 0) return true;
+                if (history_index == -1) return true;
+                if (history_index < history_size - 1) {
+                    history_index = history_index + 1;
+                    input = history[static_cast<std::size_t>(history_index)];
+                } else {
+                    input = input_backup;
+                    history_index = -1;
+                }
+                return true;
+            }
+        }
+
         if (focus_region != FocusRegion::BottomCommand && event.is_character()) {
             return true;
         }
@@ -1028,6 +1058,12 @@ void run_app_tui(AppSession& session) {
             }
             const std::string cmd = input;
             input.clear();
+            if (!cmd.empty()) {
+                if (history.empty() || cmd != history.back()) {
+                    history.push_back(cmd);
+                }
+            }
+            history_index = -1;
 
             if (cmd.empty()) return true;
 
