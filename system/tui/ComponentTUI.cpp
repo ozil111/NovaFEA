@@ -6,10 +6,11 @@
 #include "components/mesh_components.h"
 #include "components/load_components.h"
 #include "components/material_components.h"
-#include "components/property_components.h"
 #include "components/simdroid_components.h"
 #include "PartGraph.h"
 #include "analysis/GraphBuilder.h"
+#include <ftxui/component/component.hpp>
+#include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/node.hpp>
 #include <ftxui/screen/screen.hpp>
 #include <algorithm>
@@ -21,18 +22,18 @@ namespace tui {
 namespace {
 
 entt::entity find_set_by_name(entt::registry& reg, const std::string& name) {
-    auto view = reg.view<const Component::SetName>();
+    auto view = reg.view<const ::Component::SetName>();
     for (auto e : view) {
-        if (view.get<const Component::SetName>(e).value == name)
+        if (view.get<const ::Component::SetName>(e).value == name)
             return e;
     }
     return entt::null;
 }
 
 entt::entity find_part_entity_by_name(entt::registry& reg, const std::string& name) {
-    auto view = reg.view<const Component::SimdroidPart>();
+    auto view = reg.view<const ::Component::SimdroidPart>();
     for (auto e : view) {
-        if (view.get<const Component::SimdroidPart>(e).name == name)
+        if (view.get<const ::Component::SimdroidPart>(e).name == name)
             return e;
     }
     return entt::null;
@@ -52,9 +53,9 @@ Element matrix_6x6_element(const Eigen::Matrix<double, 6, 6>& D) {
 void init_registry() {
     auto& r = ComponentTUIRegistry::instance();
 
-    r.register_component<Component::Position>("Position",
+    r.register_component<::Component::Position>("Position",
         [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
-            const auto& p = reg.get<Component::Position>(e);
+            const auto& p = reg.get<::Component::Position>(e);
             std::ostringstream sx, sy, sz;
             sx << std::fixed << std::setprecision(6) << p.x;
             sy << std::fixed << std::setprecision(6) << p.y;
@@ -66,40 +67,40 @@ void init_registry() {
             });
         });
 
-    r.register_component<Component::NodeID>("NodeID",
+    r.register_component<::Component::NodeID>("NodeID",
         [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
-            return text("  " + std::to_string(reg.get<Component::NodeID>(e).value));
+            return text("  " + std::to_string(reg.get<::Component::NodeID>(e).value));
         });
 
-    r.register_component<Component::ElementID>("ElementID",
+    r.register_component<::Component::ElementID>("ElementID",
         [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
-            return text("  " + std::to_string(reg.get<Component::ElementID>(e).value));
+            return text("  " + std::to_string(reg.get<::Component::ElementID>(e).value));
         });
 
-    r.register_component<Component::Connectivity>("Connectivity",
+    r.register_component<::Component::Connectivity>("Connectivity",
         [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
-            const auto& c = reg.get<Component::Connectivity>(e);
+            const auto& c = reg.get<::Component::Connectivity>(e);
             Elements node_list;
             for (entt::entity ne : c.nodes) {
-                if (reg.valid(ne) && reg.all_of<Component::NodeID>(ne))
-                    node_list.push_back(text(std::to_string(reg.get<Component::NodeID>(ne).value)) | border);
+                if (reg.valid(ne) && reg.all_of<::Component::NodeID>(ne))
+                    node_list.push_back(text(std::to_string(reg.get<::Component::NodeID>(ne).value)) | border);
                 else
                     node_list.push_back(text("?") | border);
             }
             return hbox(std::move(node_list)) | flex;
         });
 
-    r.register_component<Component::ElementType>("ElementType",
+    r.register_component<::Component::ElementType>("ElementType",
         [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
-            return text("  type_id = " + std::to_string(reg.get<Component::ElementType>(e).type_id));
+            return text("  type_id = " + std::to_string(reg.get<::Component::ElementType>(e).type_id));
         });
 
-    r.register_component<Component::SimdroidPart>("SimdroidPart",
+    r.register_component<::Component::SimdroidPart>("SimdroidPart",
         [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
-            const auto& p = reg.get<Component::SimdroidPart>(e);
+            const auto& p = reg.get<::Component::SimdroidPart>(e);
             Elements lines = { text("  name = " + p.name) };
-            if (reg.valid(p.material) && reg.all_of<Component::SetName>(p.material))
-                lines.push_back(text("  material = " + reg.get<Component::SetName>(p.material).value));
+            if (reg.valid(p.material) && reg.all_of<::Component::SetName>(p.material))
+                lines.push_back(text("  material = " + reg.get<::Component::SetName>(p.material).value));
             else
                 lines.push_back(text("  material = (entity)"));
             if (reg.valid(p.section))
@@ -107,40 +108,40 @@ void init_registry() {
             return vbox(std::move(lines));
         });
 
-    r.register_component<Component::MaterialModel>("MaterialModel",
+    r.register_component<::Component::MaterialModel>("MaterialModel",
         [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
-            return text("  " + reg.get<Component::MaterialModel>(e).value);
+            return text("  " + reg.get<::Component::MaterialModel>(e).value);
         });
 
-    r.register_component<Component::LinearElasticParams>("LinearElasticParams",
+    r.register_component<::Component::LinearElasticParams>("LinearElasticParams",
         [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
-            const auto& le = reg.get<Component::LinearElasticParams>(e);
+            const auto& le = reg.get<::Component::LinearElasticParams>(e);
             std::ostringstream ss;
             ss << "  rho = " << le.rho << ", E = " << le.E << ", nu = " << le.nu;
             return text(ss.str());
         });
 
-    r.register_component<Component::LinearElasticMatrix>("LinearElasticMatrix",
+    r.register_component<::Component::LinearElasticMatrix>("LinearElasticMatrix",
         [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
-            const auto& lem = reg.get<Component::LinearElasticMatrix>(e);
+            const auto& lem = reg.get<::Component::LinearElasticMatrix>(e);
             Elements parts = { text("  is_initialized = " + std::string(lem.is_initialized ? "true" : "false")) };
             if (lem.is_initialized)
                 parts.push_back(vbox({ text("  D (6x6):"), matrix_6x6_element(lem.D) }));
             return vbox(std::move(parts));
         });
 
-    r.register_component<Component::AppliedLoadRef>("AppliedLoadRef",
+    r.register_component<::Component::AppliedLoadRef>("AppliedLoadRef",
         [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
-            const auto& ref = reg.get<Component::AppliedLoadRef>(e);
+            const auto& ref = reg.get<::Component::AppliedLoadRef>(e);
             Elements lines = { text("  loads: " + std::to_string(ref.load_entities.size()) + " ref(s)") };
             for (size_t i = 0; i < ref.load_entities.size(); ++i) {
                 entt::entity le = ref.load_entities[i];
                 if (!reg.valid(le)) { lines.push_back(text("    [" + std::to_string(i) + "] (invalid)")); continue; }
-                if (reg.all_of<Component::NodalLoad>(le)) {
-                    const auto& nl = reg.get<Component::NodalLoad>(le);
+                if (reg.all_of<::Component::NodalLoad>(le)) {
+                    const auto& nl = reg.get<::Component::NodalLoad>(le);
                     lines.push_back(text("    [" + std::to_string(i) + "] NodalLoad dof=" + nl.dof + " value=" + std::to_string(nl.value)));
-                } else if (reg.all_of<Component::BaseAccelerationLoad>(le)) {
-                    const auto& ba = reg.get<Component::BaseAccelerationLoad>(le);
+                } else if (reg.all_of<::Component::BaseAccelerationLoad>(le)) {
+                    const auto& ba = reg.get<::Component::BaseAccelerationLoad>(le);
                     std::ostringstream ss;
                     ss << "    [" << i << "] BaseAcceleration ax=" << ba.ax << " ay=" << ba.ay << " az=" << ba.az;
                     lines.push_back(text(ss.str()));
@@ -150,15 +151,15 @@ void init_registry() {
             return vbox(std::move(lines));
         });
 
-    r.register_component<Component::AppliedBoundaryRef>("AppliedBoundaryRef",
+    r.register_component<::Component::AppliedBoundaryRef>("AppliedBoundaryRef",
         [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
-            const auto& ref = reg.get<Component::AppliedBoundaryRef>(e);
+            const auto& ref = reg.get<::Component::AppliedBoundaryRef>(e);
             Elements lines = { text("  boundaries: " + std::to_string(ref.boundary_entities.size()) + " ref(s)") };
             for (size_t i = 0; i < ref.boundary_entities.size(); ++i) {
                 entt::entity be = ref.boundary_entities[i];
                 if (!reg.valid(be)) { lines.push_back(text("    [" + std::to_string(i) + "] (invalid)")); continue; }
-                if (reg.all_of<Component::BoundarySPC>(be)) {
-                    const auto& spc = reg.get<Component::BoundarySPC>(be);
+                if (reg.all_of<::Component::BoundarySPC>(be)) {
+                    const auto& spc = reg.get<::Component::BoundarySPC>(be);
                     lines.push_back(text("    [" + std::to_string(i) + "] SPC dof=" + spc.dof + " value=" + std::to_string(spc.value)));
                 } else
                     lines.push_back(text("    [" + std::to_string(i) + "] (other)"));
@@ -166,9 +167,9 @@ void init_registry() {
             return vbox(std::move(lines));
         });
 
-    r.register_component<Component::ForcePathNode>("ForcePathNode",
+    r.register_component<::Component::ForcePathNode>("ForcePathNode",
         [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
-            const auto& fp = reg.get<Component::ForcePathNode>(e);
+            const auto& fp = reg.get<::Component::ForcePathNode>(e);
             std::ostringstream ss;
             ss << "  weight = " << fp.weight
                << ", is_load_point = " << (fp.is_load_point ? "true" : "false")
@@ -176,21 +177,21 @@ void init_registry() {
             return text(ss.str());
         });
 
-    r.register_component<Component::SetName>("SetName",
+    r.register_component<::Component::SetName>("SetName",
         [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
-            return text("  " + reg.get<Component::SetName>(e).value);
+            return text("  " + reg.get<::Component::SetName>(e).value);
         });
 
-    r.register_component<Component::ElementSetMembers>("ElementSetMembers",
+    r.register_component<::Component::ElementSetMembers>("ElementSetMembers",
         [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
-            const auto& m = reg.get<Component::ElementSetMembers>(e);
+            const auto& m = reg.get<::Component::ElementSetMembers>(e);
             std::string line = "  count = " + std::to_string(m.members.size()) + "\n  ";
             const size_t show = (std::min)(m.members.size(), size_t(20));
             for (size_t i = 0; i < show; ++i) {
                 if (i > 0) line += ", ";
                 entt::entity me = m.members[i];
-                if (reg.valid(me) && reg.all_of<Component::ElementID>(me))
-                    line += std::to_string(reg.get<Component::ElementID>(me).value);
+                if (reg.valid(me) && reg.all_of<::Component::ElementID>(me))
+                    line += std::to_string(reg.get<::Component::ElementID>(me).value);
                 else
                     line += "?";
             }
@@ -198,16 +199,16 @@ void init_registry() {
             return text(line);
         });
 
-    r.register_component<Component::NodeSetMembers>("NodeSetMembers",
+    r.register_component<::Component::NodeSetMembers>("NodeSetMembers",
         [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
-            const auto& m = reg.get<Component::NodeSetMembers>(e);
+            const auto& m = reg.get<::Component::NodeSetMembers>(e);
             std::string line = "  count = " + std::to_string(m.members.size()) + "\n  ";
             const size_t show = (std::min)(m.members.size(), size_t(20));
             for (size_t i = 0; i < show; ++i) {
                 if (i > 0) line += ", ";
                 entt::entity me = m.members[i];
-                if (reg.valid(me) && reg.all_of<Component::NodeID>(me))
-                    line += std::to_string(reg.get<Component::NodeID>(me).value);
+                if (reg.valid(me) && reg.all_of<::Component::NodeID>(me))
+                    line += std::to_string(reg.get<::Component::NodeID>(me).value);
                 else
                     line += "?";
             }
@@ -297,19 +298,19 @@ void render_panel(entt::registry& reg, entt::entity e, SimdroidInspector* insp,
 
     if (kind == PanelEntityKind::Node)
         component_views.push_back(window(text("Force path") | bold, force_path_element(reg, e, insp)));
-    else if (kind == PanelEntityKind::Element && insp && insp->is_built && reg.all_of<Component::ElementID>(e) && reg.all_of<Component::Connectivity>(e)) {
-        const auto& c = reg.get<Component::Connectivity>(e);
+    else if (kind == PanelEntityKind::Element && insp && insp->is_built && reg.all_of<::Component::ElementID>(e) && reg.all_of<::Component::Connectivity>(e)) {
+        const auto& c = reg.get<::Component::Connectivity>(e);
         Elements node_texts;
         for (size_t i = 0; i < c.nodes.size(); ++i) {
             if (i > 0) node_texts.push_back(text(", "));
-            if (reg.valid(c.nodes[i]) && reg.all_of<Component::NodeID>(c.nodes[i]))
-                node_texts.push_back(text(std::to_string(reg.get<Component::NodeID>(c.nodes[i]).value)));
+            if (reg.valid(c.nodes[i]) && reg.all_of<::Component::NodeID>(c.nodes[i]))
+                node_texts.push_back(text(std::to_string(reg.get<::Component::NodeID>(c.nodes[i]).value)));
         }
         node_texts.push_back(text(" (Use panel node <id> to inspect)") | dim);
         component_views.push_back(window(text("Contains Nodes") | bold, hbox(std::move(node_texts))));
 
         // Show part of this element if available in inspector
-        int eid = reg.get<Component::ElementID>(e).value;
+        int eid = reg.get<::Component::ElementID>(e).value;
         auto itp = insp->eid_to_part.find(eid);
         if (itp != insp->eid_to_part.end()) {
             std::string part_line = "Part: [" + itp->second + "]";
@@ -341,21 +342,21 @@ void render_panel(entt::registry& reg, entt::entity e, SimdroidInspector* insp,
 Element force_path_element(entt::registry& reg, entt::entity node_entity, SimdroidInspector* insp) {
     Element none = text("(none)") | dim;
     if (!insp || !insp->is_built) return none;
-    if (!reg.all_of<Component::NodeID>(node_entity)) return none;
-    int nid = reg.get<Component::NodeID>(node_entity).value;
+    if (!reg.all_of<::Component::NodeID>(node_entity)) return none;
+    int nid = reg.get<::Component::NodeID>(node_entity).value;
 
     bool is_load = false, is_constraint = false;
-    if (reg.all_of<Component::ForcePathNode>(node_entity)) {
-        const auto& fp = reg.get<Component::ForcePathNode>(node_entity);
+    if (reg.all_of<::Component::ForcePathNode>(node_entity)) {
+        const auto& fp = reg.get<::Component::ForcePathNode>(node_entity);
         is_load = fp.is_load_point;
         is_constraint = fp.is_constraint_point;
     } else {
-        if (reg.all_of<Component::AppliedLoadRef>(node_entity)) {
-            const auto& ref = reg.get<Component::AppliedLoadRef>(node_entity);
+        if (reg.all_of<::Component::AppliedLoadRef>(node_entity)) {
+            const auto& ref = reg.get<::Component::AppliedLoadRef>(node_entity);
             if (!ref.load_entities.empty()) is_load = true;
         }
-        if (reg.all_of<Component::AppliedBoundaryRef>(node_entity)) {
-            const auto& ref = reg.get<Component::AppliedBoundaryRef>(node_entity);
+        if (reg.all_of<::Component::AppliedBoundaryRef>(node_entity)) {
+            const auto& ref = reg.get<::Component::AppliedBoundaryRef>(node_entity);
             if (!ref.boundary_entities.empty()) is_constraint = true;
         }
     }
@@ -415,6 +416,120 @@ Element force_path_element(entt::registry& reg, entt::entity node_entity, Simdro
         }
     }
     return vbox(std::move(parts_el));
+}
+
+void render_nodes_list(entt::registry& reg) {
+    struct Row {
+        int nid;
+        double x, y, z;
+    };
+    std::vector<Row> rows;
+    auto view = reg.view<const ::Component::NodeID, const ::Component::Position>();
+    rows.reserve(view.size_hint());
+    for (auto e : view) {
+        const auto& id = view.get<const ::Component::NodeID>(e);
+        const auto& p = view.get<const ::Component::Position>(e);
+        rows.push_back(Row{ id.value, p.x, p.y, p.z });
+    }
+    std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.nid < b.nid; });
+
+    int selected_row = rows.empty() ? -1 : 0;
+
+    auto screen = ScreenInteractive::Fullscreen();
+
+    ftxui::Component ui = ftxui::Renderer([&] {
+        Elements lines;
+        lines.push_back(
+            hbox({
+                text(" NodeID ") | bold,
+                text(" | "),
+                text(" X ") | bold,
+                text(" | "),
+                text(" Y ") | bold,
+                text(" | "),
+                text(" Z ") | bold,
+            }) | border);
+
+        for (size_t i = 0; i < rows.size(); ++i) {
+            const auto& r = rows[i];
+            std::ostringstream sx, sy, sz;
+            sx.setf(std::ios::fixed); sy.setf(std::ios::fixed); sz.setf(std::ios::fixed);
+            sx << std::setprecision(6) << r.x;
+            sy << std::setprecision(6) << r.y;
+            sz << std::setprecision(6) << r.z;
+
+            Element row = hbox({
+                text(" " + std::to_string(r.nid) + " ") | color(Color::Cyan),
+                text(" | "),
+                text(" " + sx.str() + " "),
+                text(" | "),
+                text(" " + sy.str() + " "),
+                text(" | "),
+                text(" " + sz.str() + " "),
+            }) | border;
+
+            if (static_cast<int>(i) == selected_row)
+                row = row | inverted;
+            lines.push_back(std::move(row));
+        }
+
+        Element header = hbox({
+            text(" NovaFEA ") | bgcolor(Color::Blue) | color(Color::White) | bold,
+            text(" Nodes ") | color(Color::Cyan),
+            filler(),
+            text("Count: " + std::to_string(rows.size())) | dim
+        }) | border;
+
+        const float focus_y =
+            rows.empty() ? 0.0f : static_cast<float>(selected_row + 1) / static_cast<float>(rows.size() + 1);
+        Element body = vbox(std::move(lines))
+            | focusPositionRelative(0.0f, focus_y)
+            | yframe
+            | vscroll_indicator
+            | flex;
+        Element footer = text("Scroll: wheel / ↑↓ / PgUp PgDn   Quit: Enter or Q") | dim;
+
+        return vbox({ header, body, footer }) | border;
+    });
+
+    ui = ftxui::CatchEvent(ui, [&](Event event) {
+        if (!rows.empty()) {
+            const int max_idx = static_cast<int>(rows.size()) - 1;
+            if (event == Event::ArrowUp) {
+                selected_row = (std::max)(0, selected_row - 1);
+                return true;
+            }
+            if (event == Event::ArrowDown) {
+                selected_row = (std::min)(max_idx, selected_row + 1);
+                return true;
+            }
+            if (event == Event::PageUp) {
+                selected_row = (std::max)(0, selected_row - 10);
+                return true;
+            }
+            if (event == Event::PageDown) {
+                selected_row = (std::min)(max_idx, selected_row + 10);
+                return true;
+            }
+            if (event.is_mouse()) {
+                const auto& m = event.mouse();
+                if (m.button == Mouse::WheelUp) {
+                    selected_row = (std::max)(0, selected_row - 3);
+                    return true;
+                }
+                if (m.button == Mouse::WheelDown) {
+                    selected_row = (std::min)(max_idx, selected_row + 3);
+                    return true;
+                }
+            }
+        }
+        if (event == Event::Return || event == Event::Character('q') || event == Event::Character('Q')) {
+            screen.Exit();
+            return true;
+        }
+        return false;
+    });
+    screen.Loop(ui);
 }
 
 } // namespace tui

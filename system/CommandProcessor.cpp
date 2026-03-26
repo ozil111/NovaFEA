@@ -60,6 +60,15 @@ entt::entity find_set_by_name(entt::registry& registry, const std::string& name)
     return entt::null;
 }
 
+int allocate_next_node_id(entt::registry& registry) {
+    int max_id = 0;
+    auto view = registry.view<const Component::NodeID>();
+    for (auto e : view) {
+        max_id = std::max(max_id, view.get<const Component::NodeID>(e).value);
+    }
+    return max_id + 1;
+}
+
 entt::entity get_or_create_set_entity(entt::registry& registry, const std::string& name) {
     entt::entity e = find_set_by_name(registry, name);
     if (e != entt::null) return e;
@@ -107,7 +116,7 @@ void process_command(const std::string& command_line, AppSession& session) {
                      "info, build_topology, list_bodies, show_body, "
                      "list_parts, delete_part, graph, validate_constraints, list_constraint_warnings, "
                      "panel node <nid>, panel elem <eid>, panel part <name>, panel set <name>, "
-                     "node, node_add, node_move, node_delete, "
+                     "node, list_nodes, node_add, node_move, node_delete, "
                      "elem, elem_add, elem_delete, "
                      "list_sets, set_info, set_addnode, set_addelem, set_removenode, set_removeelem, "
                      "save, help, quit");
@@ -510,17 +519,13 @@ void process_command(const std::string& command_line, AppSession& session) {
     // Basic node / element operations
     // =======================================================
     else if (command == "node_add") {
-        int nid;
         double x, y, z;
-        if (!(ss >> nid >> x >> y >> z)) {
-            spdlog::error("Usage: node_add <nid> <x> <y> <z>");
+        if (!(ss >> x >> y >> z)) {
+            spdlog::error("Usage: node_add <x> <y> <z>");
             return;
         }
         auto& registry = session.data.registry;
-        if (find_node_by_id(registry, nid) != entt::null) {
-            spdlog::error("Node {} already exists.", nid);
-            return;
-        }
+        int nid = allocate_next_node_id(registry);
         auto e = registry.create();
         registry.emplace<Component::Position>(e, x, y, z);
         registry.emplace<Component::NodeID>(e, nid);
@@ -902,6 +907,35 @@ void process_command(const std::string& command_line, AppSession& session) {
             }
         }
         spdlog::info("set_removeelem '{}' : removed {} entries.", set_name, removed);
+    }
+    else if (command == "list_nodes") {
+        std::string mode;
+        ss >> mode;
+        auto& registry = session.data.registry;
+        if (mode == "tui") {
+            tui::render_nodes_list(registry);
+            return;
+        }
+
+        // Default: plain text listing to log
+        struct Row {
+            int nid;
+            double x, y, z;
+        };
+        std::vector<Row> rows;
+        auto view = registry.view<const Component::NodeID, const Component::Position>();
+        rows.reserve(view.size_hint());
+        for (auto e : view) {
+            const auto& id = view.get<const Component::NodeID>(e);
+            const auto& p = view.get<const Component::Position>(e);
+            rows.push_back(Row{ id.value, p.x, p.y, p.z });
+        }
+        std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.nid < b.nid; });
+
+        spdlog::info("Nodes: {}", rows.size());
+        for (const auto& r : rows) {
+            spdlog::info("  nid={} pos=({:.6f}, {:.6f}, {:.6f})", r.nid, r.x, r.y, r.z);
+        }
     }
     else if (command == "node") {
         int nid;

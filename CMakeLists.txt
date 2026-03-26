@@ -103,6 +103,7 @@ target_link_libraries(NovaFEA_app
     EnTT::EnTT
     tinyxml2::tinyxml2
     ftxui::dom
+    ftxui::component
     ftxui::screen
 )
 

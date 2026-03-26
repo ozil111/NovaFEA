@@ -60,6 +60,9 @@ entt::entity resolve_panel_entity(entt::registry& reg, SimdroidInspector* insp,
 void render_panel(entt::registry& reg, entt::entity e, SimdroidInspector* insp,
     PanelEntityKind kind, const std::string& display_id);
 
+/** Render a simple node list view (NodeID + Position) to stdout. */
+void render_nodes_list(entt::registry& reg);
+
 /** Force-path insight element for a node (PartGraph edges, load/constraint). Returns empty element if none. */
 Element force_path_element(entt::registry& reg, entt::entity node_entity, SimdroidInspector* insp);
 
