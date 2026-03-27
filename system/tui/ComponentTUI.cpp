@@ -1059,24 +1059,28 @@ void run_app_tui(AppSession& session) {
 
     auto render_elements_list_element = [&]() -> Element {
         Elements lines;
-        lines.push_back(
-            hbox({
-                text(" ElementID ") | bold, text(" | "),
-                text(" TypeID ") | bold,    text(" | "),
-                text(" Nodes ") | bold,
-            }) | border);
+        const int total_count = static_cast<int>(elem_rows.size());
+        const int margin = 30;
+        const int anchor_idx = elem_selected_row >= 0 ? elem_selected_row : 0;
+        const int start_idx = (std::max)(0, anchor_idx - margin);
+        const int end_idx = (std::min)(total_count, anchor_idx + margin + 1);
+        Element header_row = hbox({
+            text(" ElementID ") | bold, text(" | "),
+            text(" TypeID ") | bold,    text(" | "),
+            text(" Nodes ") | bold,
+        }) | color(Color::YellowLight);
 
-        for (size_t i = 0; i < elem_rows.size(); ++i) {
-            const auto& r = elem_rows[i];
+        for (int i = start_idx; i < end_idx; ++i) {
+            const auto& r = elem_rows[static_cast<std::size_t>(i)];
             Element row = hbox({
                 text(" " + std::to_string(r.eid) + " ") | color(Color::Cyan),
                 text(" | "),
                 text(" " + std::to_string(r.type_id) + " ") | color(Color::YellowLight),
                 text(" | "),
                 text(" " + r.nodes + " "),
-            }) | border;
-            if (static_cast<int>(i) == elem_selected_row)
-                row = row | inverted;
+            });
+            if (i == elem_selected_row)
+                row = row | inverted | focus;
             lines.push_back(std::move(row));
         }
 
@@ -1085,25 +1089,37 @@ void run_app_tui(AppSession& session) {
                 text(" NovaFEA ") | bgcolor(Color::Blue) | color(Color::White) | bold,
                 text(" Elements ") | color(Color::Cyan),
                 filler(),
-                text("Count: " + std::to_string(elem_rows.size())) | dim
-            }) | border,
-            vbox(std::move(lines)),
-            text("Scroll: wheel / ↑↓ / PgUp PgDn   Enter: panel   Tip: use 'panel elem <eid>' for details.") | dim,
-        });
+                text(
+                    "Viewing: " + std::to_string(total_count == 0 ? 0 : start_idx + 1) +
+                    "-" + std::to_string(end_idx) +
+                    " / " + std::to_string(total_count)
+                ) | dim
+            }),
+            separator(),
+            header_row,
+            separatorLight(),
+            vbox(std::move(lines)) | flex,
+            separator(),
+            text("Scroll: wheel / ArrowUp ArrowDown / PgUp PgDn   Enter: panel") | dim,
+        }) | border;
     };
 
     auto render_nodes_list_element = [&]() -> Element {
         Elements lines;
-        lines.push_back(
-            hbox({
-                text(" NodeID ") | bold, text(" | "),
-                text(" X ") | bold,     text(" | "),
-                text(" Y ") | bold,     text(" | "),
-                text(" Z ") | bold,
-            }) | border);
+        const int total_count = static_cast<int>(node_rows.size());
+        const int margin = 30;
+        const int anchor_idx = node_selected_row >= 0 ? node_selected_row : 0;
+        const int start_idx = (std::max)(0, anchor_idx - margin);
+        const int end_idx = (std::min)(total_count, anchor_idx + margin + 1);
+        Element header_row = hbox({
+            text(" NodeID ") | bold, text(" | "),
+            text(" X ") | bold,     text(" | "),
+            text(" Y ") | bold,     text(" | "),
+            text(" Z ") | bold,
+        }) | color(Color::Cyan);
 
-        for (size_t i = 0; i < node_rows.size(); ++i) {
-            const auto& r = node_rows[i];
+        for (int i = start_idx; i < end_idx; ++i) {
+            const auto& r = node_rows[static_cast<std::size_t>(i)];
             std::ostringstream sx, sy, sz;
             sx.setf(std::ios::fixed); sy.setf(std::ios::fixed); sz.setf(std::ios::fixed);
             sx << std::setprecision(6) << r.x;
@@ -1117,9 +1133,9 @@ void run_app_tui(AppSession& session) {
                 text(" " + sy.str() + " "),
                 text(" | "),
                 text(" " + sz.str() + " "),
-            }) | border;
-            if (static_cast<int>(i) == node_selected_row) {
-                row = row | inverted;
+            });
+            if (i == node_selected_row) {
+                row = row | inverted | focus;
             }
             lines.push_back(std::move(row));
         }
@@ -1129,11 +1145,19 @@ void run_app_tui(AppSession& session) {
                 text(" NovaFEA ") | bgcolor(Color::Blue) | color(Color::White) | bold,
                 text(" Nodes ") | color(Color::Cyan),
                 filler(),
-                text("Count: " + std::to_string(node_rows.size())) | dim
-            }) | border,
-            vbox(std::move(lines)),
-            text("Scroll: wheel / ↑↓ / PgUp PgDn   Enter: panel   Tip: use 'panel node <nid>' for details.") | dim,
-        });
+                text(
+                    "Viewing: " + std::to_string(total_count == 0 ? 0 : start_idx + 1) +
+                    "-" + std::to_string(end_idx) +
+                    " / " + std::to_string(total_count)
+                ) | dim
+            }),
+            separator(),
+            header_row,
+            separatorLight(),
+            vbox(std::move(lines)) | flex,
+            separator(),
+            text("Scroll: wheel / ArrowUp ArrowDown / PgUp PgDn   Enter: panel") | dim,
+        }) | border;
     };
 
     auto input_component = Input(&input, "command...");
@@ -1159,7 +1183,6 @@ void run_app_tui(AppSession& session) {
             window(
                 text(left_focused ? " TUI View [TAB] " : " TUI View ") | bold,
                 top_left
-                    | focusPositionRelative(0.0f, left_focus)
                     | yframe
                     | vscroll_indicator
                     | flex);
