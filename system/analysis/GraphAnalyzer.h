@@ -10,11 +10,12 @@
 #include <queue>
 #include <set>
 #include <algorithm>
+#include <unordered_set>
 
 struct GraphAnalysisResult {
     // 关键路径上的节点集合 (Load -> Constraint)
     std::unordered_set<std::string> critical_path_nodes;
-    // 连通分�?(每个 vector 代表一组相互连接的零件)
+    // 连通分�?(每个 vector 代表一组相互连接的零件)
     std::vector<std::vector<std::string>> components;
 };
 
@@ -23,7 +24,7 @@ public:
     static GraphAnalysisResult analyze(const PartGraph& graph) {
         GraphAnalysisResult result;
         
-        // 1. 寻找所有连通分�?(解决图太�?太长的问�?
+        // 1. 寻找所有连通分�?(解决图太�?太长的问�?
         std::unordered_set<std::string> visited;
         for (const auto& [name, node] : graph.nodes) {
             if (visited.find(name) == visited.end()) {
@@ -50,16 +51,16 @@ public:
             }
         }
         
-        // 排序分量：包�?Load �?Constraint 的分量排在前�?
+        // 排序分量：包�?Load �?Constraint 的分量排在前�?
         std::sort(result.components.begin(), result.components.end(), [&](const auto& a, const auto& b) {
             bool a_important = has_load_or_fix(graph, a);
             bool b_important = has_load_or_fix(graph, b);
             if (a_important != b_important) return a_important > b_important;
-            return a.size() > b.size(); // 大的分量排前�?
+            return a.size() > b.size(); // 大的分量排前�?
         });
 
-        // 2. (可�? 寻找关键传力路径 (Dijkstra �?BFS)
-        // 这里的简化逻辑：标记所有在 Load 分量中的节点�?Critical
+        // 2. (可�? 寻找关键传力路径 (Dijkstra �?BFS)
+        // 这里的简化逻辑：标记所有在 Load 分量中的节点�?Critical
         for (const auto& comp : result.components) {
             if (has_load_or_fix(graph, comp)) {
                 for(const auto& node : comp) result.critical_path_nodes.insert(node);

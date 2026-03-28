@@ -1,7 +1,7 @@
 /**
  * Copyright (c) 2025 NovaFEA. All rights reserved.
  * Author: Xiaotong Wang
- * 基于 Vis.js 的高性能拓扑报告生成�?
+ * High-performance topology report generation using Vis.js.
  */
 #pragma once
 #include "PartGraph.h"
@@ -17,7 +17,7 @@ public:
         std::ofstream file(output_path);
         if (!file.is_open()) return;
 
-        // 写入 HTML 头部�?Vis.js CDN
+        // Write HTML head and Vis.js CDN script
         file << R"HTML(
 <!DOCTYPE html>
 <html>
@@ -35,13 +35,13 @@ public:
 </head>
 <body>
     <div class="legend">
-        <strong>NovaFEA 结构图例</strong>
-        <div class="legend-item"><div class="color-box" style="background:#ffcccc; border:1px solid #ff0000;"></div> 载荷节点 (Load)</div>
-        <div class="legend-item"><div class="color-box" style="background:#e6ccff; border:1px solid #800080;"></div> 约束节点 (Fix)</div>
-        <div class="legend-item"><div class="color-box" style="background:#d2e5ff; border:1px solid #2b7ce9;"></div> 普通组�?(Normal)</div>
+        <strong>NovaFEA legend</strong>
+        <div class="legend-item"><div class="color-box" style="background:#ffcccc; border:1px solid #ff0000;"></div> Load node</div>
+        <div class="legend-item"><div class="color-box" style="background:#e6ccff; border:1px solid #800080;"></div> Constraint (fixed) node</div>
+        <div class="legend-item"><div class="color-box" style="background:#d2e5ff; border:1px solid #2b7ce9;"></div> Standard part</div>
         <hr/>
-        <div class="legend-item">�?粗线: Tie 连接</div>
-        <div class="legend-item">�?虚线: Shared Nodes</div>
+        <div class="legend-item">Thick line: Tie connection</div>
+        <div class="legend-item">Dashed line: Shared nodes</div>
     </div>
     <div id="network-container"></div>
 
@@ -49,7 +49,7 @@ public:
         var nodes = new vis.DataSet([
 )HTML";
 
-        // 1. 生成节点数据 (JSON 格式)
+        // 1. Emit node data (JSON)
         bool first = true;
         for (const auto& [name, node] : graph.nodes) {
             if (!first) file << ",\n";
@@ -83,7 +83,7 @@ public:
         var edges = new vis.DataSet([
 )HTML";
 
-        // 2. 生成边数�?
+        // 2. Emit edge data
         first = true;
         for (const auto& [name, node] : graph.nodes) {
             std::string src_id = sanitize_id(name);
@@ -94,7 +94,7 @@ public:
                 if (!first) file << ",\n";
                 file << "            { from: \"" << src_id << "\", to: \"" << tgt_id << "\", ";
 
-                // 根据连接类型设置样式
+                // Edge style by connection type
                 if (edge.type == ConnectionType::Contact) {
                     if (edge.sub_type == "Tie") {
                         file << "label: 'Tie', width: 4, color: '#e67e22'";
@@ -111,7 +111,7 @@ public:
             }
         }
 
-        // 3. 写入 Vis.js 配置和初始化脚本
+        // 3. Vis.js options and initialization
         file << R"HTML(
         ]);
 
@@ -129,7 +129,7 @@ public:
         };
         var network = new vis.Network(container, data, options);
 
-        // 点击节点时显示材料和属性信�?
+        // On node click, show material and property info
         network.on('click', function (params) {
             if (params.nodes.length === 0) return;
             var nodeId = params.nodes[0];
