@@ -67,6 +67,9 @@ void render_nodes_list(entt::registry& reg);
 /** Render a simple element list view (ElementID + ElementType + Connectivity) to stdout. */
 void render_elements_list(entt::registry& reg);
 
+/** Render Simdroid parts (name, material, element count) in a scrollable fullscreen list. */
+void render_parts_list(entt::registry& reg);
+
 /**
  * Render element list and return selected ElementID.
  * Returns -1 when the user quits without selecting.

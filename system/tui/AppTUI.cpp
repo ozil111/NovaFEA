@@ -4,6 +4,7 @@
 #include "tui/ComponentTUI.h"
 #include "simdroid/SimdroidInspector.h"
 #include "components/mesh_components.h"
+#include "components/simdroid_components.h"
 #include "AppSession.h"
 #include "CommandProcessor.h"
 #include "spdlog/spdlog.h"
@@ -130,7 +131,7 @@ void run_app_tui(AppSession& session) {
     float left_focus = 0.0f;
     float right_focus = 0.0f;
     FocusRegion focus_region = FocusRegion::BottomCommand;
-    enum class LeftViewMode { None, StaticElement, NodesList, ElementsList };
+    enum class LeftViewMode { None, StaticElement, NodesList, ElementsList, PartsList };
     LeftViewMode left_view_mode = LeftViewMode::None;
     struct NodeListRow {
         int nid;
@@ -147,6 +148,14 @@ void run_app_tui(AppSession& session) {
     std::vector<ElemListRow> elem_rows;
     int elem_selected_row = -1;
 
+    struct PartListRow {
+        std::string name;
+        std::string material;
+        std::size_t elem_count;
+    };
+    std::vector<PartListRow> part_rows;
+    int part_selected_row = -1;
+
     // top_panel: interactive component shown in the left-top view.
     std::optional<ftxui::Component> top_panel;
 
@@ -156,6 +165,7 @@ void run_app_tui(AppSession& session) {
         std::string entity_id;
         int node_idx = -1;
         int elem_idx = -1;
+        int part_idx = -1;
         float left_focus = 0.0f;
         FocusRegion focus_region = FocusRegion::BottomCommand;
         std::string label;
@@ -175,6 +185,7 @@ void run_app_tui(AppSession& session) {
         st.mode = left_view_mode;
         st.node_idx = node_selected_row;
         st.elem_idx = elem_selected_row;
+        st.part_idx = part_selected_row;
         st.left_focus = left_focus;
         st.focus_region = focus_region;
         if (left_view_mode == LeftViewMode::StaticElement) {
@@ -192,6 +203,8 @@ void run_app_tui(AppSession& session) {
         node_selected_row = -1;
         elem_rows.clear();
         elem_selected_row = -1;
+        part_rows.clear();
+        part_selected_row = -1;
         left_focus = 0.0f;
         current_panel_type.clear();
         current_panel_id.clear();
@@ -320,6 +333,16 @@ void run_app_tui(AppSession& session) {
             static_cast<float>(elem_rows.size() + 1));
     };
 
+    auto sync_parts_focus = [&]() {
+        if (part_rows.empty() || part_selected_row < 0) {
+            left_focus = 0.0f;
+            return;
+        }
+        left_focus = clamp01(
+            static_cast<float>(part_selected_row + 1) /
+            static_cast<float>(part_rows.size() + 1));
+    };
+
     auto build_nodes_list_view = [&]() {
         auto& reg = session.data.registry;
         auto view = reg.view<const ::Component::NodeID, const ::Component::Position>();
@@ -370,6 +393,32 @@ void run_app_tui(AppSession& session) {
         focus_region = FocusRegion::TopLeftView;
     };
 
+    auto build_parts_list_view = [&]() {
+        auto& reg = session.data.registry;
+        auto view = reg.view<const ::Component::SimdroidPart>();
+        part_rows.clear();
+        part_rows.reserve(static_cast<std::size_t>(view.size()));
+        for (auto e : view) {
+            const auto& part = view.get<const ::Component::SimdroidPart>(e);
+            std::size_t count = 0;
+            if (reg.valid(part.element_set) && reg.all_of<::Component::ElementSetMembers>(part.element_set)) {
+                count = reg.get<::Component::ElementSetMembers>(part.element_set).members.size();
+            }
+            std::string mat_name = "-";
+            if (reg.valid(part.material) && reg.all_of<::Component::SetName>(part.material)) {
+                mat_name = reg.get<::Component::SetName>(part.material).value;
+            }
+            part_rows.push_back(PartListRow{ part.name, std::move(mat_name), count });
+        }
+        std::sort(part_rows.begin(), part_rows.end(),
+            [](const PartListRow& a, const PartListRow& b) { return a.name < b.name; });
+        left_view_mode = LeftViewMode::PartsList;
+        top_panel.reset();
+        current_panel_type.clear();
+        current_panel_id.clear();
+        focus_region = FocusRegion::TopLeftView;
+    };
+
     auto restore_view_state = [&]() -> bool {
         if (view_history.empty())
             return false;
@@ -394,6 +443,15 @@ void run_app_tui(AppSession& session) {
                 elem_selected_row = -1;
             }
             sync_elems_focus();
+        } else if (st.mode == LeftViewMode::PartsList) {
+            build_parts_list_view();
+            if (!part_rows.empty()) {
+                const int max_idx = static_cast<int>(part_rows.size()) - 1;
+                part_selected_row = (std::max)(0, (std::min)(max_idx, st.part_idx));
+            } else {
+                part_selected_row = -1;
+            }
+            sync_parts_focus();
         } else if (st.mode == LeftViewMode::StaticElement && !st.entity_type.empty() && !st.entity_id.empty()) {
             (void)open_panel_in_top_view(st.entity_type, st.entity_id, false);
         } else {
@@ -508,6 +566,53 @@ void run_app_tui(AppSession& session) {
         }) | border;
     };
 
+    auto render_parts_list_element = [&]() -> Element {
+        Elements lines;
+        const int total_count = static_cast<int>(part_rows.size());
+        const int margin = 30;
+        const int anchor_idx = part_selected_row >= 0 ? part_selected_row : 0;
+        const int start_idx = (std::max)(0, anchor_idx - margin);
+        const int end_idx = (std::min)(total_count, anchor_idx + margin + 1);
+        Element header_row = hbox({
+            text(" Part ") | bold, text(" | "),
+            text(" Material ") | bold, text(" | "),
+            text(" Elements ") | bold,
+        }) | color(Color::Cyan);
+
+        for (int i = start_idx; i < end_idx; ++i) {
+            const auto& r = part_rows[static_cast<std::size_t>(i)];
+            Element row = hbox({
+                text(" " + r.name + " ") | color(Color::Cyan),
+                text(" | "),
+                text(" " + r.material + " ") | color(Color::YellowLight),
+                text(" | "),
+                text(" " + std::to_string(r.elem_count) + " "),
+            });
+            if (i == part_selected_row)
+                row = row | inverted | focus;
+            lines.push_back(std::move(row));
+        }
+
+        return vbox({
+            hbox({
+                text(" NovaFEA ") | bgcolor(Color::Blue) | color(Color::White) | bold,
+                text(" Parts ") | color(Color::Cyan),
+                filler(),
+                text(
+                    "Viewing: " + std::to_string(total_count == 0 ? 0 : start_idx + 1) +
+                    "-" + std::to_string(end_idx) +
+                    " / " + std::to_string(total_count)
+                ) | dim
+            }),
+            separator(),
+            header_row,
+            separatorLight(),
+            vbox(std::move(lines)) | flex,
+            separator(),
+            text("Scroll: wheel / ArrowUp ArrowDown / PgUp PgDn   Enter: panel") | dim,
+        }) | border;
+    };
+
     auto input_component = Input(&input, "command...");
 
     auto ui = Renderer(input_component, [&] {
@@ -516,10 +621,12 @@ void run_app_tui(AppSession& session) {
             top_left = render_nodes_list_element();
         } else if (left_view_mode == LeftViewMode::ElementsList) {
             top_left = render_elements_list_element();
+        } else if (left_view_mode == LeftViewMode::PartsList) {
+            top_left = render_parts_list_element();
         } else if (top_panel.has_value()) {
             top_left = top_panel.value()->Render();
         } else {
-            top_left = text("No active TUI view. Try: list_nodes, list_elements, panel ...") | dim;
+            top_left = text("No active TUI view. Try: list_nodes, list_elements, list_parts, panel ...") | dim;
         }
 
         const bool left_focused = focus_region == FocusRegion::TopLeftView;
@@ -620,6 +727,11 @@ void run_app_tui(AppSession& session) {
                     save_view_state("list_elements");
                     (void)open_panel_in_top_view("elem",
                         std::to_string(elem_rows[static_cast<std::size_t>(elem_selected_row)].eid), false);
+                } else if (left_view_mode == LeftViewMode::PartsList && !part_rows.empty() &&
+                    part_selected_row >= 0 && part_selected_row < static_cast<int>(part_rows.size())) {
+                    save_view_state("list_parts");
+                    (void)open_panel_in_top_view("part",
+                        part_rows[static_cast<std::size_t>(part_selected_row)].name, false);
                 }
                 return true;
             }
@@ -654,6 +766,7 @@ void run_app_tui(AppSession& session) {
                     "  info",
                     "  list_nodes",
                     "  list_elements",
+                    "  list_parts",
                     "  panel node <nid>",
                     "  panel elem <eid>",
                     "  panel part <name>",
@@ -685,6 +798,15 @@ void run_app_tui(AppSession& session) {
                 build_elements_list_view();
                 elem_selected_row = elem_rows.empty() ? -1 : 0;
                 sync_elems_focus();
+                focus_region = FocusRegion::TopLeftView;
+                return true;
+            }
+
+            if (cmd == "list_parts") {
+                save_view_state("list_parts");
+                build_parts_list_view();
+                part_selected_row = part_rows.empty() ? -1 : 0;
+                sync_parts_focus();
                 focus_region = FocusRegion::TopLeftView;
                 return true;
             }
@@ -768,6 +890,32 @@ void run_app_tui(AppSession& session) {
             }
         }
 
+        if (focus_region == FocusRegion::TopLeftView &&
+            left_view_mode == LeftViewMode::PartsList &&
+            !part_rows.empty()) {
+            const int max_idx = static_cast<int>(part_rows.size()) - 1;
+            if (event == Event::ArrowUp) {
+                part_selected_row = (std::max)(0, part_selected_row - 1);
+                sync_parts_focus();
+                return true;
+            }
+            if (event == Event::ArrowDown) {
+                part_selected_row = (std::min)(max_idx, part_selected_row + 1);
+                sync_parts_focus();
+                return true;
+            }
+            if (event == Event::PageUp) {
+                part_selected_row = (std::max)(0, part_selected_row - 10);
+                sync_parts_focus();
+                return true;
+            }
+            if (event == Event::PageDown) {
+                part_selected_row = (std::min)(max_idx, part_selected_row + 10);
+                sync_parts_focus();
+                return true;
+            }
+        }
+
         if (focus_region == FocusRegion::TopLeftView && event == Event::ArrowUp) {
             left_focus = clamp01(left_focus - 0.03f);
             return true;
@@ -829,6 +977,21 @@ void run_app_tui(AppSession& session) {
                 if (m.button == Mouse::WheelDown) {
                     elem_selected_row = (std::min)(max_idx, elem_selected_row + 3);
                     sync_elems_focus();
+                    return true;
+                }
+            }
+            if (focus_region == FocusRegion::TopLeftView &&
+                left_view_mode == LeftViewMode::PartsList &&
+                !part_rows.empty()) {
+                const int max_idx = static_cast<int>(part_rows.size()) - 1;
+                if (m.button == Mouse::WheelUp) {
+                    part_selected_row = (std::max)(0, part_selected_row - 3);
+                    sync_parts_focus();
+                    return true;
+                }
+                if (m.button == Mouse::WheelDown) {
+                    part_selected_row = (std::min)(max_idx, part_selected_row + 3);
+                    sync_parts_focus();
                     return true;
                 }
             }

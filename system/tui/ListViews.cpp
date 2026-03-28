@@ -3,6 +3,7 @@
  */
 #include "tui/ComponentTUI.h"
 #include "components/mesh_components.h"
+#include "components/simdroid_components.h"
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/node.hpp>
@@ -130,6 +131,118 @@ void render_nodes_list(entt::registry& reg) {
 
 void render_elements_list(entt::registry& reg) {
     (void)render_elements_list_select(reg);
+}
+
+void render_parts_list(entt::registry& reg) {
+    struct Row {
+        std::string name;
+        std::string material;
+        std::size_t elem_count;
+    };
+    std::vector<Row> rows;
+    auto view = reg.view<const ::Component::SimdroidPart>();
+    rows.reserve(static_cast<std::size_t>(view.size()));
+    for (auto e : view) {
+        const auto& part = view.get<const ::Component::SimdroidPart>(e);
+        std::size_t count = 0;
+        if (reg.valid(part.element_set) && reg.all_of<::Component::ElementSetMembers>(part.element_set)) {
+            count = reg.get<::Component::ElementSetMembers>(part.element_set).members.size();
+        }
+        std::string mat_name = "-";
+        if (reg.valid(part.material) && reg.all_of<::Component::SetName>(part.material)) {
+            mat_name = reg.get<::Component::SetName>(part.material).value;
+        }
+        rows.push_back(Row{ part.name, std::move(mat_name), count });
+    }
+    std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.name < b.name; });
+
+    int selected_row = rows.empty() ? -1 : 0;
+
+    auto screen = ScreenInteractive::Fullscreen();
+
+    ftxui::Component ui = ftxui::Renderer([&] {
+        Elements lines;
+        lines.push_back(
+            hbox({
+                text(" Part ") | bold,
+                text(" | "),
+                text(" Material ") | bold,
+                text(" | "),
+                text(" Elements ") | bold,
+            }) | border);
+
+        for (size_t i = 0; i < rows.size(); ++i) {
+            const auto& r = rows[i];
+            Element row = hbox({
+                text(" " + r.name + " ") | color(Color::Cyan),
+                text(" | "),
+                text(" " + r.material + " ") | color(Color::YellowLight),
+                text(" | "),
+                text(" " + std::to_string(r.elem_count) + " "),
+            }) | border;
+
+            if (static_cast<int>(i) == selected_row)
+                row = row | inverted;
+            lines.push_back(std::move(row));
+        }
+
+        Element header = hbox({
+            text(" NovaFEA ") | bgcolor(Color::Blue) | color(Color::White) | bold,
+            text(" Parts ") | color(Color::Cyan),
+            filler(),
+            text("Count: " + std::to_string(rows.size())) | dim
+        }) | border;
+
+        const float focus_y =
+            rows.empty() ? 0.0f : static_cast<float>(selected_row + 1) / static_cast<float>(rows.size() + 1);
+        Element body = vbox(std::move(lines))
+            | focusPositionRelative(0.0f, focus_y)
+            | yframe
+            | vscroll_indicator
+            | flex;
+        Element footer = text("Scroll: wheel / ↑↓ / PgUp PgDn   Quit: Enter or Q") | dim;
+
+        return vbox({ header, body, footer }) | border;
+    });
+
+    ui = ftxui::CatchEvent(ui, [&](Event event) {
+        if (!rows.empty()) {
+            const int max_idx = static_cast<int>(rows.size()) - 1;
+            if (event == Event::ArrowUp) {
+                selected_row = (std::max)(0, selected_row - 1);
+                return true;
+            }
+            if (event == Event::ArrowDown) {
+                selected_row = (std::min)(max_idx, selected_row + 1);
+                return true;
+            }
+            if (event == Event::PageUp) {
+                selected_row = (std::max)(0, selected_row - 10);
+                return true;
+            }
+            if (event == Event::PageDown) {
+                selected_row = (std::min)(max_idx, selected_row + 10);
+                return true;
+            }
+            if (event.is_mouse()) {
+                const auto& m = event.mouse();
+                if (m.button == Mouse::WheelUp) {
+                    selected_row = (std::max)(0, selected_row - 3);
+                    return true;
+                }
+                if (m.button == Mouse::WheelDown) {
+                    selected_row = (std::min)(max_idx, selected_row + 3);
+                    return true;
+                }
+            }
+        }
+        if (event == Event::Return || event == Event::Character('q') || event == Event::Character('Q')) {
+            screen.Exit();
+            return true;
+        }
+        return false;
+    });
+    screen.Loop(ui);
 }
 
 int render_elements_list_select(entt::registry& reg) {
