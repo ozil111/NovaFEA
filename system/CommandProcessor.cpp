@@ -434,7 +434,7 @@ void process_command(const std::string& command_line, AppSession& session) {
     // =======================================================
     else if (command == "list_parts") {
         if (!session.mesh_loaded) { spdlog::warn("No mesh loaded."); return; }
-        session.inspector.list_parts(session.data.registry);
+        tui::render_parts_list(session.data.registry);
     }
     else if (command == "delete_part") {
         std::vector<std::string> part_names;
