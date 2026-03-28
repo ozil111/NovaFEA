@@ -10,7 +10,7 @@
 
 #include <vector>
 #include <unordered_map>
-#include "entt/entt.hpp"
+#include <entt/entt.hpp>
 
 // --- Type aliases to enhance code clarity ---
 using NodeID = int;       // External ID from input file

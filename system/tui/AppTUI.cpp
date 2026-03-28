@@ -7,7 +7,7 @@
 #include "components/simdroid_components.h"
 #include "AppSession.h"
 #include "CommandProcessor.h"
-#include "spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 #include "spdlog/sinks/base_sink.h"
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/screen_interactive.hpp>

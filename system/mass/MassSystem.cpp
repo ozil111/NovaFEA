@@ -11,7 +11,7 @@
 #include "../../data_center/components/property_components.h"
 #include "c3d8/C3D8Mass.h"
 #include "tet4/Tet4Mass.h"
-#include "spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 
 void MassSystem::compute_lumped_mass(entt::registry& registry) {
     spdlog::info("Computing lumped mass matrix...");

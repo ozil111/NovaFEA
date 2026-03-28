@@ -9,7 +9,7 @@
 #include "mesh/element_parser.h"
 #include "ElementRegistry.h" // Important: For getting element properties
 #include "parser_base/string_utils.h"
-#include "spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 #include <sstream>
 #include <vector>
 #include <string>

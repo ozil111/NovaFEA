@@ -13,7 +13,7 @@
 #include "../../../data_center/components/material_components.h"
 #include "../gauss/GaussIntegration.h"
 #include <Eigen/Dense>
-#include "spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 #include <cmath>
 
 namespace {

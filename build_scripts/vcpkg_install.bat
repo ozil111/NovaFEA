@@ -26,11 +26,23 @@ if errorlevel 8 (
     exit /b 1
 )
 
-REM Install x64-mingw-dynamic version
+REM Install x64-mingw-dynamic version (GCC-built MinGW libs)
 echo Installing x64-mingw-dynamic version...
 vcpkg install --triplet=x64-mingw-dynamic
 if errorlevel 1 (
     echo [ERROR] x64-mingw-dynamic installation failed
+    exit /b 1
+)
+
+REM Install x64-mingw-clang-dynamic (Clang-built MinGW libs; requires MinGW on PATH for linker/windres)
+if not defined VCPKG_LLVM_ROOT set "VCPKG_LLVM_ROOT=D:\Program Files\LLVM"
+REM Prepend LLVM bin so vcpkg compiler detection and the triplet toolchain agree (avoids another clang earlier on PATH)
+set "PATH=%VCPKG_LLVM_ROOT%\bin;%PATH%"
+echo Installing x64-mingw-clang-dynamic version...
+echo Using VCPKG_LLVM_ROOT=%VCPKG_LLVM_ROOT% ^(override PATH order; set VCPKG_LLVM_ROOT if needed^)
+vcpkg install --triplet=x64-mingw-clang-dynamic --overlay-triplets="%WORKSPACE%\vcpkg-triplets"
+if errorlevel 1 (
+    echo [ERROR] x64-mingw-clang-dynamic installation failed
     exit /b 1
 )
 

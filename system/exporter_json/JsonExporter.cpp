@@ -13,7 +13,7 @@
 #include "components/load_components.h"
 #include "components/analysis_component.h"
 #include "nlohmann/json.hpp"
-#include "spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 #include <fstream>
 #include <iomanip>
 #include <set>

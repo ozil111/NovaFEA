@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 #include <array>
-#include "entt/entt.hpp"
+#include <entt/entt.hpp>
 
 /**
  * @namespace Component

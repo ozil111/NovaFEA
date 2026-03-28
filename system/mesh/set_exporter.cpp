@@ -8,7 +8,7 @@
  */
 #include "mesh/set_exporter.h"
 #include "components/mesh_components.h"
-#include "spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 
 namespace SetExporter {
 
@@ -36,7 +36,7 @@ void save_node_sets(std::ofstream& file, const entt::registry& registry) {
         }
         if (ids.empty()) continue;
 
-        // 新格�? set_id, set_name, [member_ids]
+        // 新格�? set_id, set_name, [member_ids]
         file << set_id << ", " << set_name.value << ", [";
         
         // Write member node IDs inside brackets
@@ -80,7 +80,7 @@ void save_element_sets(std::ofstream& file, const entt::registry& registry) {
         }
         if (ids.empty()) continue;
 
-        // 新格�? set_id, set_name, [member_ids]
+        // 新格�? set_id, set_name, [member_ids]
         file << set_id << ", " << set_name.value << ", [";
         
         // Write member element IDs inside brackets

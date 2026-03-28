@@ -1,9 +1,9 @@
 // system/simdroid/SimdroidInspector.h
 #pragma once
-#include "entt/entt.hpp"
+#include <entt/entt.hpp>
 #include "../data_center/components/mesh_components.h"
 #include "../data_center/components/simdroid_components.h"
-#include "spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 #include <unordered_map>
 #include <unordered_set>
 #include <string>

@@ -13,11 +13,11 @@ set(CMAKE_TOOLCHAIN_FILE "D:/Document/vcpkg/scripts/buildsystems/vcpkg.cmake" CA
 
 # Set vcpkg installation path - dynamically based on triplet
 if(DEFINED VCPKG_TARGET_TRIPLET)
-    set(CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}" "${CMAKE_PREFIX_PATH}")
+    set(NOVAFEA_VCPKG_TRIPLET "${VCPKG_TARGET_TRIPLET}")
 else()
-    # Default to x64-mingw-dynamic
-    set(CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-mingw-dynamic" "${CMAKE_PREFIX_PATH}")
+    set(NOVAFEA_VCPKG_TRIPLET "x64-mingw-dynamic")
 endif()
+set(CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/vcpkg_installed/${NOVAFEA_VCPKG_TRIPLET}" "${CMAKE_PREFIX_PATH}")
 
 # Project name and C++ standard
 project(NovaFEA)
@@ -43,10 +43,9 @@ if(MSVC)
     add_definitions(-D_USE_MATH_DEFINES)
 endif()
 
-# MinGW specific settings: support for large object files (resolves 'too many sections' error)
-# When using MinGW compiler, add -Wa,-mbig-obj flag to support large object files
+# MinGW ABI on Windows (GCC or Clang): support for large object files (resolves 'too many sections')
 # This resolves compilation errors caused by large header libraries like nlohmann/json.hpp
-if(MINGW OR (WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
+if(WIN32 AND NOT MSVC)
     add_compile_options(-Wa,-mbig-obj)
 endif()
 
@@ -69,18 +68,19 @@ find_package(entt CONFIG REQUIRED)
 find_package(tinyxml2 CONFIG REQUIRED)
 find_package(ftxui CONFIG REQUIRED)
 
-# Add compile definitions to use header-only mode
-add_compile_definitions(
-    SPDLOG_HEADER_ONLY 
-    FMT_HEADER_ONLY
-)
+# Header-only spdlog + external fmt (no spdlog/fmt shared library usage)
+add_compile_definitions(FMT_HEADER_ONLY)
+add_compile_definitions(SPDLOG_HEADER_ONLY)
+add_compile_definitions(SPDLOG_FMT_EXTERNAL)
 
-# Configure EnTT to use 64-bit entity IDs to support large-scale meshes
-# Default 32-bit IDs support up to about 1 million entities (2^20 = 1,048,576)
-# 64-bit IDs support virtually unlimited entities, suitable for large FEM models
-add_compile_definitions(
-    ENTT_ID_TYPE=std::uint64_t
-)
+# Clang + libstdc++ (e.g. clang++ --target=x86_64-w64-windows-gnu): fmt's consteval format
+# string checker is not a constant expression; empty FMT_CONSTEVAL skips FMT_HAS_CONSTEVAL.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    add_compile_definitions("FMT_CONSTEVAL=")
+endif()
+
+# 64-bit entity IDs to support large-scale meshes (default 32-bit caps at ~1M entities)
+add_compile_definitions(ENTT_ID_TYPE=std::uint64_t)
 
 # Collect source files
 file(GLOB_RECURSE NovaFEA_SOURCES
@@ -94,10 +94,10 @@ list(REMOVE_ITEM NovaFEA_SOURCES "${CMAKE_SOURCE_DIR}/src/NovaFEA_implementation
 # Main executable
 add_executable(NovaFEA_app ${NovaFEA_SOURCES})
 
-# Link dependencies
-target_link_libraries(NovaFEA_app 
-    spdlog::spdlog
-    fmt::fmt
+# Link dependencies (spdlog/fmt: header-only targets only — never mix with compiled ::spdlog / ::fmt)
+target_link_libraries(NovaFEA_app PRIVATE
+    fmt::fmt-header-only
+    spdlog::spdlog_header_only
     Eigen3::Eigen
     nlohmann_json::nlohmann_json
     EnTT::EnTT
@@ -123,36 +123,23 @@ if(WIN32)
                 "$<TARGET_FILE_DIR:NovaFEA_app>"
             COMMENT "Copying runtime DLLs for MSVC build"
         )
-    else()
-        # MinGW: Copy vcpkg DLLs and MinGW runtime DLLs
-        # Find MinGW installation path
-        get_filename_component(MINGW_BIN_DIR ${CMAKE_CXX_COMPILER} DIRECTORY)
+    elseif(WIN32 AND NOT MSVC)
+        # MinGW ABI: Copy vcpkg DLLs and MinGW runtime DLLs (Clang driver lives in LLVM bin, not MinGW)
+        find_program(MINGW_GXX g++ REQUIRED)
+        get_filename_component(MINGW_BIN_DIR ${MINGW_GXX} DIRECTORY)
         
-        # Set vcpkg DLL directory based on build type
+        # vcpkg shared libs for this triplet (must match NOVAFEA_VCPKG_TRIPLET / CMAKE_PREFIX_PATH)
         if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-            set(VCPKG_BIN_DIR "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-mingw-dynamic/debug/bin")
-            set(SPDLOG_DLL "libspdlogd.dll")
-            set(FMT_DLL "libfmtd.dll")
-            set(TINYXML2_DLL "libtinyxml2.dll")
+            set(VCPKG_BIN_DIR "${CMAKE_SOURCE_DIR}/vcpkg_installed/${NOVAFEA_VCPKG_TRIPLET}/debug/bin")
         else()
-            set(VCPKG_BIN_DIR "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-mingw-dynamic/bin")
-            set(SPDLOG_DLL "libspdlog.dll")
-            set(FMT_DLL "libfmt.dll")
-            set(TINYXML2_DLL "libtinyxml2.dll")
+            set(VCPKG_BIN_DIR "${CMAKE_SOURCE_DIR}/vcpkg_installed/${NOVAFEA_VCPKG_TRIPLET}/bin")
         endif()
+        set(TINYXML2_DLL "libtinyxml2.dll")
         
         add_custom_command(TARGET NovaFEA_app POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E echo "Copying MinGW DLLs for ${CMAKE_BUILD_TYPE} build..."
             
-            # Copy vcpkg DLLs
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${VCPKG_BIN_DIR}/${SPDLOG_DLL}"
-                "$<TARGET_FILE_DIR:NovaFEA_app>"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${VCPKG_BIN_DIR}/${FMT_DLL}"
-                "$<TARGET_FILE_DIR:NovaFEA_app>"
-            
-            # Copy MinGW runtime DLLs
+            # Copy vcpkg DLLs (spdlog/fmt are header-only; tinyxml2 may still be shared)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${MINGW_BIN_DIR}/libgcc_s_seh-1.dll"
                 "$<TARGET_FILE_DIR:NovaFEA_app>"

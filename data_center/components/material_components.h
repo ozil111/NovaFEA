@@ -11,7 +11,7 @@
 #include <vector>
 #include <string>
 #include <Eigen/Dense>
-#include "entt/entt.hpp"
+#include <entt/entt.hpp>
 
 /**
  * @namespace Component

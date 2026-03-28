@@ -8,7 +8,7 @@
  * Author: Xiaotong Wang (or NovaFEA Team)
  */
 
-#include "spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 #include "DataContext.h"
 #include "components/mesh_components.h"
 #include "components/analysis_component.h"

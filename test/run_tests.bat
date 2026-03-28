@@ -29,6 +29,16 @@ if /i "%~1"=="--msvc-release" (
     set PRESET_NAME=test-msvc_release
     set BUILD_TYPE=Release
 )
+if /i "%~1"=="--gcc" (
+    set BUILD_TYPE=Debug
+    set BUILD_MODE=gcc
+    set PRESET_NAME=test-gcc
+)
+if /i "%~1"=="--gcc-release" (
+    set BUILD_MODE=gcc_release
+    set PRESET_NAME=test-gcc-release
+    set BUILD_TYPE=Release
+)
 if /i "%~1"=="--test-target" (
     set "TEST_TARGET=%~2"
     shift

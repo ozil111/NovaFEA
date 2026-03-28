@@ -293,7 +293,12 @@ def main():
     parser.add_argument('--build', action='store_true', help="Run the build script")
     parser.add_argument('--test', action='store_true', help="Run the test script")
     parser.add_argument('--itest', action='store_true', help="Run integration tests in test_case using .venv if available")
-    parser.add_argument('--mode', choices=['debug', 'release', 'msvc', 'msvc-release'], default='debug', help="Build mode (default: debug)")
+    parser.add_argument(
+        '--mode',
+        choices=['debug', 'release', 'gcc', 'gcc-release', 'msvc', 'msvc-release'],
+        default='debug',
+        help="Build mode: debug/release = Clang (default toolchain); gcc/gcc-release = MinGW GCC",
+    )
     parser.add_argument('--rebuild', action='store_true', help="Clean build directories before building")
     parser.add_argument('--test-target', type=str, default='all', help="Specify a test target to run (use 'all' to run all tests)")
     
@@ -308,7 +313,11 @@ def main():
             preset_name = 'test-msvc_release'
         elif args.mode == 'release':
             preset_name = 'test-release'
-        else:  # debug
+        elif args.mode == 'gcc':
+            preset_name = 'test-gcc'
+        elif args.mode == 'gcc-release':
+            preset_name = 'test-gcc-release'
+        else:  # debug (Clang)
             preset_name = 'test-default'
     else:
         # Use regular presets when building main program
@@ -318,7 +327,11 @@ def main():
             preset_name = 'msvc_release'
         elif args.mode == 'release':
             preset_name = 'release'
-        else:  # debug
+        elif args.mode == 'gcc':
+            preset_name = 'gcc'
+        elif args.mode == 'gcc-release':
+            preset_name = 'gcc-release'
+        else:  # debug (Clang)
             preset_name = 'default'
 
     # If building with tests, we need to use test presets

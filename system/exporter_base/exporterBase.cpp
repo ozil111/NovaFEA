@@ -8,7 +8,7 @@
  */
 #include "exporter_base/exporterBase.h"
 #include "exporter_json/JsonExporter.h"
-#include "spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 
 bool FemExporter::save(const std::string& filepath, const DataContext& data_context) {
     spdlog::info("FemExporter: Saving model to JSON format: {}", filepath);

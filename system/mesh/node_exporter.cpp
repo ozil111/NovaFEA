@@ -8,7 +8,7 @@
  */
 #include "mesh/node_exporter.h"
 #include "components/mesh_components.h"
-#include "spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 
 namespace NodeExporter {
 

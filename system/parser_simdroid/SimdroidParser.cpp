@@ -9,7 +9,7 @@
 #include "../../data_center/DofMap.h"
 #include "../parser_base/string_utils.h"
 #include "nlohmann/json.hpp"
-#include "spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 
 #include <filesystem>
 
