@@ -1,6 +1,6 @@
 import sympy as sp
 from definitions.abc import Element
-from python_jax.code_gen.sympy_codegen import MathModel
+from sympy_codegen import MathModel
 
 class Hex8(Element):
     """8-node hexahedral element (Linear interpolation)."""
