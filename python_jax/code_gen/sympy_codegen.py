@@ -401,7 +401,7 @@ class FEACompiler:
 
     @staticmethod
     def _to_fortran(model):
-        """生成 Fortran 源码，支持分块 CSE 优化。"""
+        """生成 Fortran 源码,支持分块 CSE 优化。声明和赋值必须分离。"""
         chunk_size = 24
         outputs = model.outputs
         printer = FEAFortranPrinter()
@@ -416,10 +416,20 @@ class FEACompiler:
         ]
 
         # Unpack input array to named variables
+        input_vars = []
         for i, sym in enumerate(model.inputs):
             s = str(sym)
             if s.isidentifier():
-                lines.append(f"    double precision :: {s}")
+                input_vars.append(s)
+
+        # First, declare all input variables
+        if input_vars:
+            lines.append(f"    double precision :: {', '.join(input_vars)}")
+
+        # Then assign values
+        for i, sym in enumerate(model.inputs):
+            s = str(sym)
+            if s.isidentifier():
                 lines.append(f"    {s} = in_vec({i + 1})")
 
         lines.append("    ! --- Local Variables for CSE ---")
@@ -431,8 +441,14 @@ class FEACompiler:
             lines.append(f"    ! Chunk {i//chunk_size}")
             if sub_exprs:
                 lines.append("    block")
+
+                # First, declare all local variables in the block
+                decl_vars = [str(var) for var, expr in sub_exprs]
+                if decl_vars:
+                    lines.append(f"        double precision :: {', '.join(decl_vars)}")
+
+                # Then assign values
                 for var, expr in sub_exprs:
-                    lines.append(f"        double precision :: {var}")
                     lines.append(f"        {var} = {printer.doprint(expr)}")
 
             for j, out_expr in enumerate(simplified_chunk):
