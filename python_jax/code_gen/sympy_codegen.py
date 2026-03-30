@@ -238,7 +238,16 @@ class FEACompiler:
 
         # --- Generate Function Body ---
         body_lines = []
-        
+
+        # 解包输入变量
+        for i, sym in enumerate(model.inputs):
+            s = str(sym)
+            # 检查是否是合法标识符（如 coord_2_3），如果是则解包
+            if s.isidentifier():
+                body_lines.append(f"    double {s} = in[{i}];")
+
+        body_lines.append("")
+
         # 初始化自定义 Printer
         printer = FEACodePrinter()
 
