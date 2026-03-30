@@ -41,108 +41,169 @@ def inv3x3_with_det(A: sp.Matrix):
 # Operator 1: B-bar averaged nodal gradient
 # -----------------------------------------------------------------------------
 
-def calc_b_bar_component(y: sp.Matrix, z: sp.Matrix):
+def hex8_shape(xi, eta, zeta):
     """
-    SymPy transcription of VUEL CALC_B_BAR.
-    Input:
-        y, z : 8-vectors
-    Output:
-        b    : 8-vector
-
-    This intentionally follows the original algebraic structure, but is kept in
-    symbolic vector form for readability.
+    Standard Hex8 shape functions on [-1,1]^3.
+    Return 8x1 vector N, node order consistent with the current file:
+        1 (-1,-1,-1)
+        2 ( 1,-1,-1)
+        3 ( 1, 1,-1)
+        4 (-1, 1,-1)
+        5 (-1,-1, 1)
+        6 ( 1,-1, 1)
+        7 ( 1, 1, 1)
+        8 (-1, 1, 1)
     """
-    y1, y2, y3, y4, y5, y6, y7, y8 = list(y)
-    z1, z2, z3, z4, z5, z6, z7, z8 = list(z)
-    one_over_twelve = sp.Rational(1, 12)
-
-    b = sp.Matrix([
-        -(
-            y2 * (z3 + z4 - z5 - z6)
-            + y3 * (-z2 + z4)
-            + y4 * (-z2 - z3 + z5 + z8)
-            + y5 * (z2 - z4 + z6 - z8)
-            + y6 * (z2 - z5)
-            + y8 * (-z4 + z5)
-        ) * one_over_twelve,
-        (
-            y1 * (z3 + z4 - z5 - z6)
-            + y3 * (-z1 - z4 + z6 + z7)
-            + y4 * (-z1 + z3)
-            + y5 * (z1 - z6)
-            + y6 * (z1 - z3 + z5 - z7)
-            + y7 * (-z3 + z6)
-        ) * one_over_twelve,
-        -(
-            y1 * (z2 - z4)
-            + y2 * (-z1 - z4 + z6 + z7)
-            + y4 * (z1 + z2 - z7 - z8)
-            + y6 * (-z2 + z7)
-            + y7 * (-z2 + z4 - z6 + z8)
-            + y8 * (z4 - z7)
-        ) * one_over_twelve,
-        -(
-            y1 * (z2 + z3 - z5 - z8)
-            + y2 * (-z1 + z3)
-            + y3 * (-z1 - z2 + z7 + z8)
-            + y5 * (z1 - z8)
-            + y7 * (-z3 + z8)
-            + y8 * (z1 - z3 + z5 - z7)
-        ) * one_over_twelve,
-        (
-            y1 * (z2 - z4 + z6 - z8)
-            + y2 * (-z1 + z6)
-            + y4 * (z1 - z8)
-            + y6 * (-z1 - z2 + z7 + z8)
-            + y7 * (-z6 + z8)
-            + y8 * (z1 + z4 - z6 - z7)
-        ) * one_over_twelve,
-        (
-            y1 * (z2 - z5)
-            + y2 * (-z1 + z3 - z5 + z7)
-            + y3 * (-z2 + z7)
-            + y5 * (z1 + z2 - z7 - z8)
-            + y7 * (-z2 - z3 + z5 + z8)
-            + y8 * (z5 - z7)
-        ) * one_over_twelve,
-        (
-            y2 * (z3 - z6)
-            + y3 * (-z2 + z4 - z6 + z8)
-            + y4 * (-z3 + z8)
-            + y5 * (z6 - z8)
-            + y6 * (z2 + z3 - z5 - z8)
-            + y8 * (-z3 - z4 + z5 + z6)
-        ) * one_over_twelve,
-        -(
-            y1 * (z4 - z5)
-            + y3 * (-z4 + z7)
-            + y4 * (-z1 + z3 - z5 + z7)
-            + y5 * (z1 + z4 - z6 - z7)
-            + y6 * (z5 - z7)
-            + y7 * (-z3 - z4 + z5 + z6)
-        ) * one_over_twelve,
+    return sp.Matrix([
+        (1 - xi) * (1 - eta) * (1 - zeta) / 8,
+        (1 + xi) * (1 - eta) * (1 - zeta) / 8,
+        (1 + xi) * (1 + eta) * (1 - zeta) / 8,
+        (1 - xi) * (1 + eta) * (1 - zeta) / 8,
+        (1 - xi) * (1 - eta) * (1 + zeta) / 8,
+        (1 + xi) * (1 - eta) * (1 + zeta) / 8,
+        (1 + xi) * (1 + eta) * (1 + zeta) / 8,
+        (1 - xi) * (1 + eta) * (1 + zeta) / 8,
     ])
-    return b
 
 
-def calc_vol_bbar(b1: sp.Matrix, x: sp.Matrix):
-    """SymPy version of VUEL CALC_VOL_BBAR."""
-    return sp.expand(x.dot(b1))
+def hex8_face_parametrizations():
+    """
+    Six faces of the reference Hex8.
+    Each face is represented by:
+        name, substitution dict, local variables (a, b), orientation_sign
+
+    We parametrize each face using two local coordinates (a, b) in [-1,1]^2.
+    The outward normal direction is controlled by orientation_sign.
+    """
+    a, b = sp.symbols("a b", real=True)
+
+    return [
+        # zeta = -1, outward normal should point toward -z
+        ("zeta=-1", {sp.Symbol("xi"): a, sp.Symbol("eta"): b, sp.Symbol("zeta"): -1}, (a, b), -1),
+
+        # zeta = +1, outward normal should point toward +z
+        ("zeta=+1", {sp.Symbol("xi"): a, sp.Symbol("eta"): b, sp.Symbol("zeta"):  1}, (a, b), +1),
+
+        # eta = -1, outward normal should point toward -y
+        ("eta=-1",  {sp.Symbol("xi"): a, sp.Symbol("eta"): -1, sp.Symbol("zeta"): b}, (a, b), +1),
+
+        # eta = +1, outward normal should point toward +y
+        ("eta=+1",  {sp.Symbol("xi"): a, sp.Symbol("eta"):  1, sp.Symbol("zeta"): b}, (a, b), -1),
+
+        # xi = -1, outward normal should point toward -x
+        ("xi=-1",   {sp.Symbol("xi"): -1, sp.Symbol("eta"): a, sp.Symbol("zeta"): b}, (a, b), -1),
+
+        # xi = +1, outward normal should point toward +x
+        ("xi=+1",   {sp.Symbol("xi"):  1, sp.Symbol("eta"): a, sp.Symbol("zeta"): b}, (a, b), +1),
+    ]
+
+
+def restricted_hex8_shape_on_face(face_subs):
+    """
+    Restrict the 8 Hex8 shape functions onto one face.
+    Return 8x1 vector.
+    """
+    xi = sp.Symbol("xi")
+    eta = sp.Symbol("eta")
+    zeta = sp.Symbol("zeta")
+    N = hex8_shape(xi, eta, zeta)
+    return sp.Matrix([sp.simplify(N[i].subs(face_subs)) for i in range(8)])
+
+
+def face_mapping_from_hex8(coord, face_subs):
+    """
+    Physical mapping x(a,b) of a face induced from the parent Hex8 interpolation:
+        x(a,b) = sum_I N_I|face * X_I
+    coord: 8x3 nodal coordinate matrix
+    Return:
+        xvec(a,b): 3x1 vector
+    """
+    Nf = restricted_hex8_shape_on_face(face_subs)   # 8x1
+    return coord.T * Nf                             # 3x1
+
+
+def face_area_vector_from_mapping(xvec, local_vars, orientation_sign=1):
+    """
+    Surface area vector:
+        a_vec = (dx/da) x (dx/db)
+    and optionally flipped by orientation_sign to enforce outward normal.
+    """
+    a, b = local_vars
+    dx_da = sp.diff(xvec, a)
+    dx_db = sp.diff(xvec, b)
+    return sp.simplify(orientation_sign * dx_da.cross(dx_db))
+
+
+def integrate_face_surface_vector(coord, face_subs, local_vars, orientation_sign):
+    """
+    Face contribution to:
+        G[I,:] += ∫_face N_I * n dS
+               = ∫_{-1}^{1}∫_{-1}^{1} N_I(a,b) * a_vec(a,b) da db
+    Return 8x3 matrix.
+    """
+    a, b = local_vars
+    Nf = restricted_hex8_shape_on_face(face_subs)                   # 8x1
+    xvec = face_mapping_from_hex8(coord, face_subs)                 # 3x1
+    avec = face_area_vector_from_mapping(xvec, local_vars, orientation_sign)  # 3x1
+
+    Gf = sp.Matrix.zeros(8, 3)
+    for I in range(8):
+        for j in range(3):
+            Gf[I, j] = sp.simplify(
+                sp.integrate(
+                    sp.integrate(Nf[I] * avec[j], (a, -1, 1)),
+                    (b, -1, 1),
+                )
+            )
+    return Gf
+
+
+def calc_b_bar_surface_vector(coord):
+    """
+    Most high-level FE definition of the B-bar numerator:
+
+        G[I,:] = ∫_{∂Ω} N_I n dS
+
+    where:
+        G is 8x3
+        G[:,0] corresponds to the old b_x_raw
+        G[:,1] corresponds to the old b_y_raw
+        G[:,2] corresponds to the old b_z_raw
+
+    Then average gradient is:
+        gradN_bar = G / V
+    """
+    G = sp.Matrix.zeros(8, 3)
+
+    for _, face_subs, local_vars, orientation_sign in hex8_face_parametrizations():
+        G += integrate_face_surface_vector(coord, face_subs, local_vars, orientation_sign)
+
+    return sp.simplify(G)
+
+
+def calc_volume_from_surface_vector(coord, G):
+    """
+    Volume reconstructed from the boundary integral result.
+
+    By consistency with the original code:
+        vol = x · b_x_raw
+    Here:
+        x = coord[:,0]
+        b_x_raw = G[:,0]
+
+    So:
+        vol = coord[:,0].dot(G[:,0])
+    """
+    x = coord[:, 0]
+    return sp.expand(x.dot(G[:, 0]))
 
 
 def build_hex8r_op_bbar_grad():
     coord = mat_symbols("coord", 8, 3)
 
-    x = coord[:, 0]
-    y = coord[:, 1]
-    z = coord[:, 2]
-
-    b_x_raw = calc_b_bar_component(y, z)
-    b_y_raw = calc_b_bar_component(z, x)
-    b_z_raw = calc_b_bar_component(x, y)
-
-    vol = calc_vol_bbar(b_x_raw, x)
-    BiI = sp.Matrix.hstack(b_x_raw / vol, b_y_raw / vol, b_z_raw / vol)
+    G = calc_b_bar_surface_vector(coord)      # 8x3
+    vol = calc_volume_from_surface_vector(coord, G)
+    BiI = sp.simplify(G / vol)
 
     inputs = flatten_row_major(coord)
     outputs = flatten_row_major(BiI) + [vol]
