@@ -1,6 +1,6 @@
 import sympy as sp
 from definitions.abc import Material
-from sympy_codegen import MathModel
+from python_jax.code_gen.sympy_codegen import MathModel
 
 class Isotropic(Material):
     """Linear isotropic elastic material."""

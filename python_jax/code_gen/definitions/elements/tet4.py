@@ -1,6 +1,6 @@
 import sympy as sp
 from definitions.abc import Element
-from sympy_codegen import MathModel
+from python_jax.code_gen.sympy_codegen import MathModel
 
 class Tet4(Element):
     """4-node tetrahedral element."""

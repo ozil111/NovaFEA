@@ -1,5 +1,5 @@
 import sympy as sp
-from sympy_codegen import MathModel
+from python_jax.code_gen.sympy_codegen import MathModel
 
 def get_model_vol_bbar():
     # 1. 定义输入 (B1I 和 X 各 8 个分量)

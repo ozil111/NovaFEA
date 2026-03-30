@@ -12,7 +12,7 @@ The generator supports four main types of tasks:
 
 ## 2. Command-Line Usage
 
-The primary script is `sympy_codegen.py`.
+The primary script is `python_jax.code_gen.sympy_codegen.py`.
 
 ### Arguments
 
@@ -78,7 +78,7 @@ Use this flow to generate a PeachPy script from a custom SymPy model, then assem
 ### 6.1 Generate PeachPy Python Script
 
 ```bash
-python .\sympy_codegen.py --task custom --script .\test_polystress.py --target peachpy
+python .\python_jax.code_gen.sympy_codegen.py --task custom --script .\test_polystress.py --target peachpy
 ```
 
 Output example:

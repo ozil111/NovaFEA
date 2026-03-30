@@ -1,5 +1,5 @@
 import sympy as sp
-from sympy_codegen import MathModel
+from python_jax.code_gen.sympy_codegen import MathModel  # pyright: ignore[reportImplicitRelativeImport]
 
 def get_model():
     """
