@@ -412,8 +412,17 @@ class FEACompiler:
             "    implicit none",
             f"    double precision, intent(in)  :: in_vec({len(model.inputs)})",
             f"    double precision, intent(out) :: out_vec({len(model.outputs)})",
-            "    ! --- Local Variables for CSE ---",
+            "    ! --- Unpack inputs ---",
         ]
+
+        # Unpack input array to named variables
+        for i, sym in enumerate(model.inputs):
+            s = str(sym)
+            if s.isidentifier():
+                lines.append(f"    double precision :: {s}")
+                lines.append(f"    {s} = in_vec({i + 1})")
+
+        lines.append("    ! --- Local Variables for CSE ---")
 
         for i in range(0, len(outputs), chunk_size):
             chunk = outputs[i:i + chunk_size]
