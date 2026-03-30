@@ -28,25 +28,13 @@ def flatten_row_major(mat: sp.Matrix):
 
 def inv3x3_with_det(A: sp.Matrix):
     """
-    High-level readable 3x3 inverse using the same explicit formula as VUEL.
+    High-level readable 3x3 inverse using SymPy built-in methods.
     Returns (detA, Ainv).
     """
-    a11, a12, a13 = A[0, 0], A[0, 1], A[0, 2]
-    a21, a22, a23 = A[1, 0], A[1, 1], A[1, 2]
-    a31, a32, a33 = A[2, 0], A[2, 1], A[2, 2]
-
-    detA = (
-        a11 * (a22 * a33 - a23 * a32)
-        - a12 * (a21 * a33 - a23 * a31)
-        + a13 * (a21 * a32 - a22 * a31)
-    )
-
-    Ainv = sp.Matrix([
-        [(a22 * a33 - a23 * a32) / detA, (a13 * a32 - a12 * a33) / detA, (a12 * a23 - a13 * a22) / detA],
-        [(a23 * a31 - a21 * a33) / detA, (a11 * a33 - a13 * a31) / detA, (a13 * a21 - a11 * a23) / detA],
-        [(a21 * a32 - a22 * a31) / detA, (a12 * a31 - a11 * a32) / detA, (a11 * a22 - a12 * a21) / detA],
-    ])
+    detA = A.det()
+    Ainv = A.inv()
     return detA, Ainv
+
 
 
 # -----------------------------------------------------------------------------
