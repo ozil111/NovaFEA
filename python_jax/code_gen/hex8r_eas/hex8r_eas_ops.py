@@ -66,6 +66,45 @@ def hex8_shape(xi, eta, zeta):
     ])
 
 
+def hex8_shape_gradient(xi, eta, zeta):
+    """
+    Gradients of Hex8 shape functions with respect to natural coordinates.
+    Return dN_dxi as an 8x3 matrix:
+        row I   -> node I
+        col 0   -> dN_I / dxi
+        col 1   -> dN_I / deta
+        col 2   -> dN_I / dzeta
+    """
+    N = hex8_shape(xi, eta, zeta)
+    return sp.Matrix([
+        [sp.diff(N[I], xi), sp.diff(N[I], eta), sp.diff(N[I], zeta)]
+        for I in range(8)
+    ])
+
+
+def hex8_shape_gradient_at_center():
+    """
+    Shape function gradients at the element center (0,0,0).
+    Return 8x3 matrix.
+    """
+    xi, eta, zeta = sp.symbols("xi eta zeta", real=True)
+    dN_dxi = hex8_shape_gradient(xi, eta, zeta)
+    return sp.simplify(dN_dxi.subs({xi: 0, eta: 0, zeta: 0}))
+
+
+def jacobian_from_shape_gradient(coord, dN_dxi):
+    """
+    Standard FE Jacobian:
+        J = X^T * dN_dxi
+    where:
+        coord  : 8x3 nodal coordinates
+        dN_dxi : 8x3 natural gradients
+    Return:
+        J : 3x3
+    """
+    return sp.simplify(coord.T * dN_dxi)
+
+
 def hex8_face_parametrizations():
     """
     Six faces of the reference Hex8.
@@ -225,19 +264,8 @@ def build_hex8r_op_bbar_grad():
 def build_hex8r_op_jacobian_center():
     coord = mat_symbols("coord", 8, 3)
 
-    # Natural coordinates of Hex8 nodes.
-    XiI = sp.Matrix([
-        [-1, -1, -1],
-        [ 1, -1, -1],
-        [ 1,  1, -1],
-        [-1,  1, -1],
-        [-1, -1,  1],
-        [ 1, -1,  1],
-        [ 1,  1,  1],
-        [-1,  1,  1],
-    ])
-
-    J = (XiI.T * coord * sp.Rational(1, 8)).T
+    dN_dxi_center = hex8_shape_gradient_at_center()
+    J = jacobian_from_shape_gradient(coord, dN_dxi_center)
     detJ, Jinv = inv3x3_with_det(J)
 
     inputs = flatten_row_major(coord)
@@ -257,28 +285,47 @@ def build_hex8r_op_jacobian_center():
 # Operator 3: Form B matrix from averaged gradient
 # -----------------------------------------------------------------------------
 
+def strain_displacement_block(gradN):
+    """
+    3D small-strain Voigt B-block for one node.
+
+    Input:
+        gradN : 3x1 or length-3 vector [dN/dx, dN/dy, dN/dz]
+
+    Output:
+        6x3 block:
+            [ dN/dx     0        0   ]
+            [   0     dN/dy      0   ]
+            [   0       0      dN/dz ]
+            [ dN/dy   dN/dx      0   ]
+            [   0     dN/dz   dN/dy ]
+            [ dN/dz     0     dN/dx ]
+    """
+    bx, by, bz = gradN
+    return sp.Matrix([
+        [bx, 0,  0],
+        [0,  by, 0],
+        [0,  0,  bz],
+        [by, bx, 0],
+        [0,  bz, by],
+        [bz, 0,  bx],
+    ])
+
+
 def form_B_matrix(BiI: sp.Matrix):
-    """Readable SymPy version of VUEL FORM_B_MATRIX."""
-    B = sp.zeros(6, 24)
-    for k in range(8):
-        c = 3 * k
-        bx = BiI[k, 0]
-        by = BiI[k, 1]
-        bz = BiI[k, 2]
+    """
+    Assemble the 3D strain-displacement matrix from nodal gradients.
 
-        B[0, c + 0] = bx
-        B[1, c + 1] = by
-        B[2, c + 2] = bz
+    Input:
+        BiI : 8x3 matrix
+              row I = averaged gradient of shape function N_I
 
-        B[3, c + 0] = by
-        B[3, c + 1] = bx
-
-        B[4, c + 1] = bz
-        B[4, c + 2] = by
-
-        B[5, c + 0] = bz
-        B[5, c + 2] = bx
-    return B
+    Output:
+        B : 6x24 matrix
+            horizontal concatenation of 8 nodal 6x3 blocks
+    """
+    blocks = [strain_displacement_block(BiI[I, :]) for I in range(8)]
+    return sp.Matrix.hstack(*blocks)
 
 
 
