@@ -1,4 +1,5 @@
 import sympy as sp
+from sympy.core.relational import Relational
 from sympy.printing.c import C99CodePrinter
 from sympy.printing.fortran import FCodePrinter
 from sympy.printing.numpy import JaxPrinter
@@ -86,6 +87,20 @@ class FEAFortranPrinter(FCodePrinter):
         settings.update({"standard": 95, "source_format": "free"})
         super().__init__(settings)
 
+    def _print_Piecewise(self, expr):
+        # Ensure integer default values in Piecewise are printed as double precision
+        # to avoid type mismatch in the Fortran merge() intrinsic.
+        if expr.args[-1].cond == True:
+            default = expr.args[-1].expr
+            if default.is_Integer:
+                result = f"{float(default)}d0"
+            else:
+                result = self._print(default)
+            for e, c in reversed(expr.args[:-1]):
+                result = "merge(%s, %s, %s)" % (self._print(e), result, self._print(c))
+            return result
+        return super()._print_Piecewise(expr)
+
     def _print_Float(self, expr):
         # Keep all floating constants in double precision.
         res = super()._print_Float(expr)
@@ -94,6 +109,7 @@ class FEAFortranPrinter(FCodePrinter):
     def _print_Pow(self, expr):
         base, exp = expr.as_base_exp()
         s_base = self._print(base)
+        s_exp = self._print(exp)
 
         # Integer powers
         if exp.is_Integer:
@@ -117,9 +133,20 @@ class FEAFortranPrinter(FCodePrinter):
         if abs(val + 0.5) < 1e-9:
             return f"(1.0d0 / sqrt({s_base}))"
         if abs(val - 1.0 / 3.0) < 1e-7:
-            return f"cbrt({s_base})"
+            return f"({s_base}**(1.0d0/3.0d0))"
+        if abs(val + 1.0 / 3.0) < 1e-7:
+            return f"(1.0d0 / ({s_base}**(1.0d0/3.0d0)))"
+        if abs(val - 2.0 / 3.0) < 1e-7:
+            return f"({s_base}**(2.0d0/3.0d0))"
+        if abs(val + 2.0 / 3.0) < 1e-7:
+            return f"(1.0d0 / ({s_base}**(2.0d0/3.0d0)))"
+        if abs(val - 5.0 / 6.0) < 1e-7:
+            return f"({s_base}**(5.0d0/6.0d0))"
+        if abs(val + 5.0 / 6.0) < 1e-7:
+            return f"(1.0d0 / ({s_base}**(5.0d0/6.0d0)))"
 
-        return f"({s_base}**{self._print(exp)})"
+        # Parenthesize the exponent to preserve precedence in Fortran.
+        return f"({s_base}**({s_exp}))"
 
 
 class MathModel:
@@ -238,7 +265,16 @@ class FEACompiler:
 
         # --- Generate Function Body ---
         body_lines = []
-        
+
+        # 解包输入变量
+        for i, sym in enumerate(model.inputs):
+            s = str(sym)
+            # 检查是否是合法标识符（如 coord_2_3），如果是则解包
+            if s.isidentifier():
+                body_lines.append(f"    double {s} = in[{i}];")
+
+        body_lines.append("")
+
         # 初始化自定义 Printer
         printer = FEACodePrinter()
 
@@ -401,7 +437,7 @@ class FEACompiler:
 
     @staticmethod
     def _to_fortran(model):
-        """生成 Fortran 源码，支持分块 CSE 优化。"""
+        """生成 Fortran 源码,支持分块 CSE 优化。声明和赋值必须分离。"""
         chunk_size = 24
         outputs = model.outputs
         printer = FEAFortranPrinter()
@@ -412,8 +448,27 @@ class FEACompiler:
             "    implicit none",
             f"    double precision, intent(in)  :: in_vec({len(model.inputs)})",
             f"    double precision, intent(out) :: out_vec({len(model.outputs)})",
-            "    ! --- Local Variables for CSE ---",
+            "    ! --- Unpack inputs ---",
         ]
+
+        # Unpack input array to named variables
+        input_vars = []
+        for i, sym in enumerate(model.inputs):
+            s = str(sym)
+            if s.isidentifier():
+                input_vars.append(s)
+
+        # First, declare all input variables
+        if input_vars:
+            lines.append(f"    double precision :: {', '.join(input_vars)}")
+
+        # Then assign values
+        for i, sym in enumerate(model.inputs):
+            s = str(sym)
+            if s.isidentifier():
+                lines.append(f"    {s} = in_vec({i + 1})")
+
+        lines.append("    ! --- Local Variables for CSE ---")
 
         for i in range(0, len(outputs), chunk_size):
             chunk = outputs[i:i + chunk_size]
@@ -422,8 +477,23 @@ class FEACompiler:
             lines.append(f"    ! Chunk {i//chunk_size}")
             if sub_exprs:
                 lines.append("    block")
+
+                # Separate variables by type: logical for comparisons, double precision otherwise
+                dp_vars = []
+                log_vars = []
                 for var, expr in sub_exprs:
-                    lines.append(f"        double precision :: {var}")
+                    if isinstance(expr, Relational):
+                        log_vars.append(str(var))
+                    else:
+                        dp_vars.append(str(var))
+
+                if dp_vars:
+                    lines.append(f"        double precision :: {', '.join(dp_vars)}")
+                if log_vars:
+                    lines.append(f"        logical :: {', '.join(log_vars)}")
+
+                # Then assign values
+                for var, expr in sub_exprs:
                     lines.append(f"        {var} = {printer.doprint(expr)}")
 
             for j, out_expr in enumerate(simplified_chunk):
