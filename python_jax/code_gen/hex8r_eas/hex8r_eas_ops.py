@@ -232,11 +232,13 @@ def build_hex8r_op_bbar_grad():
     inputs = flatten_row_major(coord)
     outputs = flatten_row_major(BiI) + [vol]
     input_names = [f"COORD({i+1},{j+1})" for i in range(8) for j in range(3)]
+    output_names = [f"BiI({i+1},{j+1})" for i in range(8) for j in range(3)] + ["VOL"]
     return MathModel(
         inputs=inputs,
         outputs=outputs,
         name="hex8r_op_bbar_grad",
         input_names=input_names,
+        output_names=output_names,
         is_operator=True,
     )
 
@@ -250,11 +252,17 @@ def build_hex8r_op_jacobian_center():
     inputs = flatten_row_major(coord)
     outputs = flatten_row_major(J) + [detJ] + flatten_row_major(Jinv)
     input_names = [f"COORD({i+1},{j+1})" for i in range(8) for j in range(3)]
+    output_names = (
+        [f"J({i+1},{j+1})" for i in range(3) for j in range(3)]
+        + ["detJ"]
+        + [f"Jinv({i+1},{j+1})" for i in range(3) for j in range(3)]
+    )
     return MathModel(
         inputs=inputs,
         outputs=outputs,
         name="hex8r_op_jacobian_center",
         input_names=input_names,
+        output_names=output_names,
         is_operator=True,
     )
 
@@ -283,11 +291,13 @@ def build_hex8r_op_form_B():
     inputs = flatten_row_major(BiI)
     outputs = flatten_row_major(B)
     input_names = [f"BiI({i+1},{j+1})" for i in range(8) for j in range(3)]
+    output_names = [f"B({i+1},{j+1})" for i in range(6) for j in range(24)]
     return MathModel(
         inputs=inputs,
         outputs=outputs,
         name="hex8r_op_form_B",
         input_names=input_names,
+        output_names=output_names,
         is_operator=True,
     )
 
@@ -306,11 +316,13 @@ def build_hex8r_op_internal_force():
         + [f"stress({i+1})" for i in range(6)]
         + ["detJ", "weight"]
     )
+    output_names = [f"fint({i+1})" for i in range(24)]
     return MathModel(
         inputs=inputs,
         outputs=outputs,
         name="hex8r_op_internal_force",
         input_names=input_names,
+        output_names=output_names,
         is_operator=True,
     )
 
@@ -337,11 +349,17 @@ def build_hex8r_op_mass_gp():
         [f"COORD({i+1},{j+1})" for i in range(8) for j in range(3)]
         + ["xi", "eta", "zeta", "weight", "rho"]
     )
+    output_names = (
+        [f"m_{i+1}_{j+1}" for i in range(8) for j in range(8)]
+        + [f"N({i+1})" for i in range(8)]
+        + ["detJ"]
+    )
     return MathModel(
         inputs=inputs,
         outputs=outputs,
         name="hex8r_op_mass_gp",
         input_names=input_names,
+        output_names=output_names,
         is_operator=True,
     )
 
@@ -365,11 +383,13 @@ def build_hex8r_op_hourglass_gamma():
         [f"BiI({i+1},{j+1})" for i in range(8) for j in range(3)]
         + [f"COORD({i+1},{j+1})" for i in range(8) for j in range(3)]
     )
+    output_names = [f"gamma({i+1},{j+1})" for i in range(8) for j in range(4)]
     return MathModel(
         inputs=inputs,
         outputs=outputs,
         name="hex8r_op_hourglass_gamma",
         input_names=input_names,
+        output_names=output_names,
         is_operator=True,
     )
 
@@ -399,6 +419,7 @@ def build_hex8r_op_constitutive_linear():
         outputs=flatten_row_major(D),
         name="hex8r_op_constitutive_linear",
         input_names=["E", "nu"],
+        output_names=[f"D({i+1},{j+1})" for i in range(6) for j in range(6)],
         is_operator=True,
     )
 
@@ -468,11 +489,13 @@ def build_hex8r_op_rot_dmtx():
         + [f"J0inv({i+1},{j+1})" for i in range(3) for j in range(3)]
         + ["rj"]
     )
+    output_names = [f"D_rot({i+1},{j+1})" for i in range(6) for j in range(6)]
     return MathModel(
         inputs=inputs,
         outputs=outputs,
         name="hex8r_op_rot_dmtx",
         input_names=input_names,
+        output_names=output_names,
         is_operator=True,
     )
 
@@ -580,11 +603,17 @@ def build_hex8r_op_k_matrices():
     inputs = flatten_row_major(C) + [VOL]
     outputs = flatten_nd_row_major(Kmat) + flatten_nd_row_major(K_alpha_u) + flatten_row_major(K_alpha_alpha)
     input_names = [f"C({i+1},{j+1})" for i in range(6) for j in range(6)] + ["VOL"]
+    output_names = (
+        [f"Kmat_{i}_{j}_{k}_{l}" for i in range(4) for j in range(4) for k in range(3) for l in range(3)]
+        + [f"K_alpha_u_{i}_{j}_{k}" for i in range(4) for j in range(6) for k in range(3)]
+        + [f"K_alpha_alpha({i+1},{j+1})" for i in range(6) for j in range(6)]
+    )
     return MathModel(
         inputs=inputs,
         outputs=outputs,
         name="hex8r_op_k_matrices",
         input_names=input_names,
+        output_names=output_names,
         is_operator=True,
     )
 
@@ -640,11 +669,19 @@ def build_hex8r_op_stress_cauchy_n3():
     inputs = flatten_row_major(F) + [C10, C20, C30, D1, D2, D3]
     outputs = list(stress_voigt) + [J] + flatten_row_major(B) + flatten_row_major(B_bar) + [I1_bar, W1]
     input_names = [f"F({i+1},{j+1})" for i in range(3) for j in range(3)] + ["C10", "C20", "C30", "D1", "D2", "D3"]
+    output_names = (
+        [f"sigma({i+1})" for i in range(6)]
+        + ["J"]
+        + [f"B({i+1},{j+1})" for i in range(3) for j in range(3)]
+        + [f"B_bar({i+1},{j+1})" for i in range(3) for j in range(3)]
+        + ["I1_bar", "W1"]
+    )
     return MathModel(
         inputs=inputs,
         outputs=outputs,
         name="hex8r_op_stress_cauchy_n3",
         input_names=input_names,
+        output_names=output_names,
         is_operator=True,
     )
 
@@ -676,11 +713,20 @@ def build_hex8r_op_stress_pk2_n3():
         + [I1_bar, W1]
     )
     input_names = [f"F({i+1},{j+1})" for i in range(3) for j in range(3)] + ["C10", "C20", "C30", "D1", "D2", "D3"]
+    output_names = (
+        [f"S({i+1})" for i in range(6)]
+        + ["J"]
+        + [f"C({i+1},{j+1})" for i in range(3) for j in range(3)]
+        + [f"C_bar({i+1},{j+1})" for i in range(3) for j in range(3)]
+        + [f"Cinv({i+1},{j+1})" for i in range(3) for j in range(3)]
+        + ["I1_bar", "W1"]
+    )
     return MathModel(
         inputs=inputs,
         outputs=outputs,
         name="hex8r_op_stress_pk2_n3",
         input_names=input_names,
+        output_names=output_names,
         is_operator=True,
     )
 
@@ -733,11 +779,13 @@ def build_hex8r_op_dmat_n3():
         + [f"B_bar({i+1},{j+1})" for i in range(3) for j in range(3)]
         + ["J", "I1_bar", "C10", "C20", "C30", "D1", "D2", "D3"]
     )
+    output_names = [f"DMAT({i+1},{j+1})" for i in range(6) for j in range(6)]
     return MathModel(
         inputs=inputs,
         outputs=outputs,
         name="hex8r_op_dmat_n3",
         input_names=input_names,
+        output_names=output_names,
         is_operator=True,
     )
 
@@ -800,11 +848,13 @@ def build_hex8r_op_dmat_pk2_n3():
         + [f"Cinv({i+1},{j+1})" for i in range(3) for j in range(3)]
         + ["J", "I1_bar", "C10", "C20", "C30", "D1", "D2", "D3"]
     )
+    output_names = [f"DMAT({i+1},{j+1})" for i in range(6) for j in range(6)]
     return MathModel(
         inputs=inputs,
         outputs=outputs,
         name="hex8r_op_dmat_pk2_n3",
         input_names=input_names,
+        output_names=output_names,
         is_operator=True,
     )
 
