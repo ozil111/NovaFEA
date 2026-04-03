@@ -5,6 +5,8 @@
 #include "simdroid/SimdroidInspector.h"
 #include "components/mesh_components.h"
 #include "components/simdroid_components.h"
+#include "components/material_components.h"
+#include "components/property_components.h"
 #include "AppSession.h"
 #include "CommandProcessor.h"
 #include <spdlog/spdlog.h>
@@ -150,7 +152,9 @@ void run_app_tui(AppSession& session) {
 
     struct PartListRow {
         std::string name;
-        std::string material;
+        std::string element_set;
+        std::string material_id;
+        std::string section_id;
         std::size_t elem_count;
     };
     std::vector<PartListRow> part_rows;
@@ -227,10 +231,12 @@ void run_app_tui(AppSession& session) {
         // Build the same document structure as render_panel(), but keep it inside the TUI top area.
         const char* kind_str_c = "Entity";
         switch (kind) {
-            case PanelEntityKind::Node:    kind_str_c = "Node";    break;
-            case PanelEntityKind::Element: kind_str_c = "Element"; break;
-            case PanelEntityKind::Part:    kind_str_c = "Part";    break;
-            case PanelEntityKind::Set:     kind_str_c = "Set";     break;
+            case PanelEntityKind::Node:     kind_str_c = "Node";     break;
+            case PanelEntityKind::Element:  kind_str_c = "Element";  break;
+            case PanelEntityKind::Part:     kind_str_c = "Part";     break;
+            case PanelEntityKind::Set:      kind_str_c = "Set";      break;
+            case PanelEntityKind::Material: kind_str_c = "Material"; break;
+            case PanelEntityKind::Section:  kind_str_c = "Section";  break;
             default: break;
         }
         const std::string kind_str = kind_str_c;
@@ -266,6 +272,50 @@ void run_app_tui(AppSession& session) {
                 link_buttons.push_back(Button(std::to_string(nid), [&, nid]() {
                     (void)open_panel_in_top_view("node", std::to_string(nid), true);
                 }));
+            }
+        }
+
+        if (kind == PanelEntityKind::Part && session.data.registry.all_of<::Component::SimdroidPart>(e)) {
+            const auto& part = session.data.registry.get<::Component::SimdroidPart>(e);
+            
+            // Add Material jump button
+            if (session.data.registry.valid(part.material)) {
+                std::string mat_id;
+                if (session.data.registry.all_of<::Component::MaterialID>(part.material)) {
+                    mat_id = std::to_string(session.data.registry.get<::Component::MaterialID>(part.material).value);
+                }
+                if (!mat_id.empty()) {
+                    link_buttons.push_back(Button("Material ID: " + mat_id, [&, part]() {
+                        if (session.data.registry.valid(part.material)) {
+                            std::string mid;
+                            if (session.data.registry.all_of<::Component::MaterialID>(part.material)) {
+                                mid = std::to_string(session.data.registry.get<::Component::MaterialID>(part.material).value);
+                            }
+                            if (!mid.empty())
+                                (void)open_panel_in_top_view("material", mid, true);
+                        }
+                    }));
+                }
+            }
+            
+            // Add Section jump button
+            if (session.data.registry.valid(part.section)) {
+                std::string sec_id;
+                if (session.data.registry.all_of<::Component::PropertyID>(part.section)) {
+                    sec_id = std::to_string(session.data.registry.get<::Component::PropertyID>(part.section).value);
+                }
+                if (!sec_id.empty()) {
+                    link_buttons.push_back(Button("Section ID: " + sec_id, [&, part]() {
+                        if (session.data.registry.valid(part.section)) {
+                            std::string pid;
+                            if (session.data.registry.all_of<::Component::PropertyID>(part.section)) {
+                                pid = std::to_string(session.data.registry.get<::Component::PropertyID>(part.section).value);
+                            }
+                            if (!pid.empty())
+                                (void)open_panel_in_top_view("section", pid, true);
+                        }
+                    }));
+                }
             }
         }
 
@@ -404,11 +454,25 @@ void run_app_tui(AppSession& session) {
             if (reg.valid(part.element_set) && reg.all_of<::Component::ElementSetMembers>(part.element_set)) {
                 count = reg.get<::Component::ElementSetMembers>(part.element_set).members.size();
             }
-            std::string mat_name = "-";
-            if (reg.valid(part.material) && reg.all_of<::Component::SetName>(part.material)) {
-                mat_name = reg.get<::Component::SetName>(part.material).value;
+            std::string element_set_name = "-";
+            if (reg.valid(part.element_set) && reg.all_of<::Component::SetName>(part.element_set)) {
+                element_set_name = reg.get<::Component::SetName>(part.element_set).value;
             }
-            part_rows.push_back(PartListRow{ part.name, std::move(mat_name), count });
+            std::string material_id = "-";
+            if (reg.valid(part.material) && reg.all_of<::Component::MaterialID>(part.material)) {
+                material_id = std::to_string(reg.get<::Component::MaterialID>(part.material).value);
+            }
+            std::string section_id = "-";
+            if (reg.valid(part.section) && reg.all_of<::Component::PropertyID>(part.section)) {
+                section_id = std::to_string(reg.get<::Component::PropertyID>(part.section).value);
+            }
+            part_rows.push_back(PartListRow{
+                part.name,
+                std::move(element_set_name),
+                std::move(material_id),
+                std::move(section_id),
+                count
+            });
         }
         std::sort(part_rows.begin(), part_rows.end(),
             [](const PartListRow& a, const PartListRow& b) { return a.name < b.name; });
@@ -575,7 +639,9 @@ void run_app_tui(AppSession& session) {
         const int end_idx = (std::min)(total_count, anchor_idx + margin + 1);
         Element header_row = hbox({
             text(" Part ") | bold, text(" | "),
-            text(" Material ") | bold, text(" | "),
+            text(" Element Set ") | bold, text(" | "),
+            text(" Material ID ") | bold, text(" | "),
+            text(" Section ID ") | bold, text(" | "),
             text(" Elements ") | bold,
         }) | color(Color::Cyan);
 
@@ -584,7 +650,11 @@ void run_app_tui(AppSession& session) {
             Element row = hbox({
                 text(" " + r.name + " ") | color(Color::Cyan),
                 text(" | "),
-                text(" " + r.material + " ") | color(Color::YellowLight),
+                text(" " + r.element_set + " ") | color(Color::White),
+                text(" | "),
+                text(" " + r.material_id + " ") | color(Color::YellowLight),
+                text(" | "),
+                text(" " + r.section_id + " ") | color(Color::GreenLight),
                 text(" | "),
                 text(" " + std::to_string(r.elem_count) + " "),
             });
@@ -749,9 +819,6 @@ void run_app_tui(AppSession& session) {
 
             if (cmd.empty()) return true;
 
-            // Clear the view when a normal command is entered; view commands will set it again.
-            clear_left_view();
-
             if (cmd == "quit" || cmd == "exit") {
                 session.is_running = false;
                 screen.Exit();
@@ -771,6 +838,8 @@ void run_app_tui(AppSession& session) {
                     "  panel elem <eid>",
                     "  panel part <name>",
                     "  panel set <name>",
+                    "  panel material <id_or_name>",
+                    "  panel section <id_or_name>",
                     "  quit / exit",
                     "",
                     "Note: other commands are supported; they will execute and log to the normal logger.",
@@ -815,9 +884,10 @@ void run_app_tui(AppSession& session) {
             if (starts_with(cmd, "panel ")) {
                 std::stringstream ss(cmd);
                 std::string keyword, type, id_or_name;
-                ss >> keyword >> type >> id_or_name;
+                ss >> keyword >> type;
+                std::getline(ss >> std::ws, id_or_name);
                 if (type.empty() || id_or_name.empty()) {
-                    spdlog::error("Usage: panel <type> <id_or_name>  (type: node|elem|element|part|set)");
+                    spdlog::error("Usage: panel <type> <id_or_name>  (type: node|elem|element|part|set|material|section)");
                     return true;
                 }
                 (void)open_panel_in_top_view(type, id_or_name, true);
@@ -826,6 +896,7 @@ void run_app_tui(AppSession& session) {
 
             // Fallback: execute existing command processor (logs go to spdlog sinks).
             view_history.clear();
+            clear_left_view();
             process_command(cmd, session);
             return true;
         }

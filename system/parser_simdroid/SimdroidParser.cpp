@@ -468,13 +468,20 @@ void SimdroidParser::parse_control_json(const std::string& path, DataContext& ct
     std::unordered_map<std::string, entt::entity> cross_section_map;
 
     if (j.contains("CrossSection") && j["CrossSection"].is_object()) {
+        int pid_counter = 1;  // Auto-incrementing PID
         for (auto& [cs_name, cs_val] : j["CrossSection"].items()) {
             const entt::entity cs_entity = registry.create();
             registry.emplace<Component::SetName>(cs_entity, cs_name);
+            registry.emplace<Component::PropertyID>(cs_entity, pid_counter++);  // Auto-assign PID
             cross_section_map.emplace(cs_name, cs_entity);
 
             const std::string type_str = cs_val.value("Type", "");
             const std::string type_l = to_lower_copy(type_str);
+
+            // Register Type component for all CrossSection entities
+            if (!type_str.empty()) {
+                registry.emplace<Component::Type>(cs_entity, type_str);
+            }
 
             // --- Solid / SolidOrthotropic ---
             if (type_l == "solid" || type_l == "solidorthotropic") {
@@ -826,6 +833,11 @@ void SimdroidParser::parse_control_json(const std::string& path, DataContext& ct
     if (j.contains("Material") && j["Material"].is_object()) {
         for (auto& [key, val] : j["Material"].items()) {
             const entt::entity mat_e = registry.create();
+
+            // Material ID (MID) - primary key connecting elements and materials
+            if (val.contains("MID") && val["MID"].is_number_integer()) {
+                registry.emplace<Component::MaterialID>(mat_e, val["MID"].get<int>());
+            }
 
             // Material type (prefer Simdroid's "MaterialType", fallback to legacy "Type")
             const std::string mat_type = val.value("MaterialType", val.value("Type", ""));
