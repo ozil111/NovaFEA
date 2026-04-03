@@ -6,6 +6,7 @@
 #include "components/load_components.h"
 #include "components/material_components.h"
 #include "components/simdroid_components.h"
+#include "components/property_components.h"
 #include <iomanip>
 #include <sstream>
 #include <algorithm>
@@ -78,8 +79,21 @@ void init_registry() {
                 lines.push_back(text("  material = " + reg.get<::Component::SetName>(p.material).value));
             else
                 lines.push_back(text("  material = (entity)"));
-            if (reg.valid(p.section))
-                lines.push_back(text("  section = (entity)"));
+            
+            // Improved section display logic
+            if (reg.valid(p.section)) {
+                std::string section_info;
+                if (reg.all_of<::Component::SetName>(p.section)) {
+                    section_info = reg.get<::Component::SetName>(p.section).value;
+                } else if (reg.all_of<::Component::PropertyID>(p.section)) {
+                    section_info = "ID:" + std::to_string(reg.get<::Component::PropertyID>(p.section).value);
+                } else if (reg.all_of<::Component::Formulation>(p.section)) {
+                    section_info = "[" + reg.get<::Component::Formulation>(p.section).value + "]";
+                } else {
+                    section_info = "(entity)";
+                }
+                lines.push_back(text("  section = " + section_info));
+            }
             return vbox(std::move(lines));
         });
 
