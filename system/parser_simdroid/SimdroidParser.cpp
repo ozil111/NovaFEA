@@ -478,6 +478,11 @@ void SimdroidParser::parse_control_json(const std::string& path, DataContext& ct
             const std::string type_str = cs_val.value("Type", "");
             const std::string type_l = to_lower_copy(type_str);
 
+            // Register Type component for all CrossSection entities
+            if (!type_str.empty()) {
+                registry.emplace<Component::Type>(cs_entity, type_str);
+            }
+
             // --- Solid / SolidOrthotropic ---
             if (type_l == "solid" || type_l == "solidorthotropic") {
                 Component::SolidAdvancedProperty prop{};
