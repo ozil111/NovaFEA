@@ -26,6 +26,24 @@ Element matrix_6x6_element(const Eigen::Matrix<double, 6, 6>& D) {
     return vbox(std::move(rows));
 }
 
+std::string entity_set_name(entt::registry& reg, entt::entity e) {
+    if (reg.valid(e) && reg.all_of<::Component::SetName>(e))
+        return reg.get<::Component::SetName>(e).value;
+    return "-";
+}
+
+std::string entity_material_id(entt::registry& reg, entt::entity e) {
+    if (reg.valid(e) && reg.all_of<::Component::MaterialID>(e))
+        return std::to_string(reg.get<::Component::MaterialID>(e).value);
+    return "-";
+}
+
+std::string entity_property_id(entt::registry& reg, entt::entity e) {
+    if (reg.valid(e) && reg.all_of<::Component::PropertyID>(e))
+        return std::to_string(reg.get<::Component::PropertyID>(e).value);
+    return "-";
+}
+
 void init_registry() {
     auto& r = ComponentTUIRegistry::instance();
 
@@ -74,26 +92,12 @@ void init_registry() {
     r.register_component<::Component::SimdroidPart>("SimdroidPart",
         [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
             const auto& p = reg.get<::Component::SimdroidPart>(e);
-            Elements lines = { text("  name = " + p.name) };
-            if (reg.valid(p.material) && reg.all_of<::Component::SetName>(p.material))
-                lines.push_back(text("  material = " + reg.get<::Component::SetName>(p.material).value));
-            else
-                lines.push_back(text("  material = (entity)"));
-            
-            // Improved section display logic
-            if (reg.valid(p.section)) {
-                std::string section_info;
-                if (reg.all_of<::Component::SetName>(p.section)) {
-                    section_info = reg.get<::Component::SetName>(p.section).value;
-                } else if (reg.all_of<::Component::PropertyID>(p.section)) {
-                    section_info = "ID:" + std::to_string(reg.get<::Component::PropertyID>(p.section).value);
-                } else if (reg.all_of<::Component::Formulation>(p.section)) {
-                    section_info = "[" + reg.get<::Component::Formulation>(p.section).value + "]";
-                } else {
-                    section_info = "(entity)";
-                }
-                lines.push_back(text("  section = " + section_info));
-            }
+            Elements lines = {
+                text("  name = " + p.name),
+                text("  element_set = " + entity_set_name(reg, p.element_set)),
+                text("  material_id = " + entity_material_id(reg, p.material)),
+                text("  section_id = " + entity_property_id(reg, p.section)),
+            };
             return vbox(std::move(lines));
         });
 
