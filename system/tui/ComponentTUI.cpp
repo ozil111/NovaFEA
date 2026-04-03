@@ -44,6 +44,14 @@ std::string entity_property_id(entt::registry& reg, entt::entity e) {
     return "-";
 }
 
+std::string shell_type_name(int type_id) {
+    switch (type_id) {
+        case 1:  return "Shell";
+        case 11: return "SandwichShell";
+        default: return "Shell(type_id=" + std::to_string(type_id) + ")";
+    }
+}
+
 void init_registry() {
     auto& r = ComponentTUIRegistry::instance();
 
@@ -104,6 +112,65 @@ void init_registry() {
     r.register_component<::Component::MaterialModel>("MaterialModel",
         [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
             return text("  " + reg.get<::Component::MaterialModel>(e).value);
+        });
+
+    r.register_component<::Component::PropertyID>("PropertyID",
+        [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
+            return text("  " + std::to_string(reg.get<::Component::PropertyID>(e).value));
+        });
+
+    r.register_component<::Component::SolidProperty>("SolidProperty",
+        [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
+            const auto& p = reg.get<::Component::SolidProperty>(e);
+            Elements lines = {
+                text("  Type = Solid"),
+                text("  type_id = " + std::to_string(p.type_id)),
+            };
+            return vbox(std::move(lines));
+        });
+
+    r.register_component<::Component::SolidAdvancedProperty>("SolidAdvancedProperty",
+        [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
+            const auto& p = reg.get<::Component::SolidAdvancedProperty>(e);
+            Elements lines = {
+                text("  Type = Solid"),
+                text("  SmallStrain = " + (p.small_strain.empty() ? "-" : p.small_strain)),
+                text("  Formulation = " + (p.formulation.empty() ? "-" : p.formulation)),
+            };
+            return vbox(std::move(lines));
+        });
+
+    r.register_component<::Component::ShellProperty>("ShellProperty",
+        [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
+            const auto& p = reg.get<::Component::ShellProperty>(e);
+            Elements lines = {
+                text("  Type = " + shell_type_name(p.type_id)),
+                text("  SmallStrain = -"),
+                text("  Formulation = -"),
+            };
+            return vbox(std::move(lines));
+        });
+
+    r.register_component<::Component::SolidShellProperty>("SolidShellProperty",
+        [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
+            const auto& p = reg.get<::Component::SolidShellProperty>(e);
+            Elements lines = {
+                text("  Type = SolidShell"),
+                text("  SmallStrain = " + (p.small_strain.value.empty() ? "-" : p.small_strain.value)),
+                text("  Formulation = " + (p.formulation.value.empty() ? "-" : p.formulation.value)),
+            };
+            return vbox(std::move(lines));
+        });
+
+    r.register_component<::Component::SolidShCompProperty>("SolidShCompProperty",
+        [](entt::registry& reg, entt::entity e, SimdroidInspector*) -> Element {
+            const auto& p = reg.get<::Component::SolidShCompProperty>(e);
+            Elements lines = {
+                text("  Type = SolidShComp"),
+                text("  SmallStrain = " + (p.small_strain.value.empty() ? "-" : p.small_strain.value)),
+                text("  Formulation = " + (p.formulation.value.empty() ? "-" : p.formulation.value)),
+            };
+            return vbox(std::move(lines));
         });
 
     r.register_component<::Component::LinearElasticParams>("LinearElasticParams",
