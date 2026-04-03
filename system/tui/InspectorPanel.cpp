@@ -5,6 +5,8 @@
 #include "simdroid/SimdroidInspector.h"
 #include "components/mesh_components.h"
 #include "components/simdroid_components.h"
+#include "components/material_components.h"
+#include "components/property_components.h"
 #include "PartGraph.h"
 #include "analysis/GraphBuilder.h"
 #include <ftxui/component/component.hpp>
@@ -22,6 +24,16 @@ entt::entity find_set_by_name(entt::registry& reg, const std::string& name) {
     auto view = reg.view<const ::Component::SetName>();
     for (auto e : view) {
         if (view.get<const ::Component::SetName>(e).value == name)
+            return e;
+    }
+    return entt::null;
+}
+
+template <typename TargetComponent>
+entt::entity find_named_entity_with_component(entt::registry& reg, const std::string& name) {
+    auto view = reg.view<const ::Component::SetName, const TargetComponent>();
+    for (auto e : view) {
+        if (view.template get<const ::Component::SetName>(e).value == name)
             return e;
     }
     return entt::null;
@@ -82,6 +94,54 @@ entt::entity resolve_panel_entity(entt::registry& reg, SimdroidInspector* insp,
         return se;
     }
 
+    if (type == "material" || type == "mat") {
+        // Try to find by MaterialID first
+        int mid = 0;
+        try { mid = std::stoi(id_or_name); } catch (...) {
+            entt::entity me = find_named_entity_with_component<::Component::MaterialID>(reg, id_or_name);
+            if (me != entt::null) {
+                if (out_kind) *out_kind = PanelEntityKind::Material;
+                if (out_display_id) *out_display_id = id_or_name;
+                return me;
+            }
+            return entt::null;
+        }
+        // Find by MaterialID value
+        auto view = reg.view<const ::Component::MaterialID>();
+        for (auto e : view) {
+            if (view.get<const ::Component::MaterialID>(e).value == mid) {
+                if (out_kind) *out_kind = PanelEntityKind::Material;
+                if (out_display_id) *out_display_id = std::to_string(mid);
+                return e;
+            }
+        }
+        return entt::null;
+    }
+
+    if (type == "section" || type == "prop" || type == "property") {
+        // Try to find by PropertyID first
+        int pid = 0;
+        try { pid = std::stoi(id_or_name); } catch (...) {
+            entt::entity pe = find_named_entity_with_component<::Component::PropertyID>(reg, id_or_name);
+            if (pe != entt::null) {
+                if (out_kind) *out_kind = PanelEntityKind::Section;
+                if (out_display_id) *out_display_id = id_or_name;
+                return pe;
+            }
+            return entt::null;
+        }
+        // Find by PropertyID value
+        auto view = reg.view<const ::Component::PropertyID>();
+        for (auto e : view) {
+            if (view.get<const ::Component::PropertyID>(e).value == pid) {
+                if (out_kind) *out_kind = PanelEntityKind::Section;
+                if (out_display_id) *out_display_id = std::to_string(pid);
+                return e;
+            }
+        }
+        return entt::null;
+    }
+
     return entt::null;
 }
 
@@ -90,10 +150,12 @@ void render_panel(entt::registry& reg, entt::entity e, SimdroidInspector* insp,
 {
     const char* kind_str = "Entity";
     switch (kind) {
-        case PanelEntityKind::Node:    kind_str = "Node";    break;
-        case PanelEntityKind::Element: kind_str = "Element"; break;
-        case PanelEntityKind::Part:    kind_str = "Part";    break;
-        case PanelEntityKind::Set:     kind_str = "Set";     break;
+        case PanelEntityKind::Node:     kind_str = "Node";     break;
+        case PanelEntityKind::Element:  kind_str = "Element";  break;
+        case PanelEntityKind::Part:     kind_str = "Part";     break;
+        case PanelEntityKind::Set:      kind_str = "Set";      break;
+        case PanelEntityKind::Material: kind_str = "Material"; break;
+        case PanelEntityKind::Section:  kind_str = "Section";  break;
         default: break;
     }
 

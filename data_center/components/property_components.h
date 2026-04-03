@@ -44,6 +44,9 @@ namespace Component {
     // ------------------------------------------------------------------
 
     // Element formulation/recipe (e.g. "Shell4", "Hex8R", etc.)
+    struct Type{
+        std::string value;
+    };
     struct Formulation {
         std::string value;
     };

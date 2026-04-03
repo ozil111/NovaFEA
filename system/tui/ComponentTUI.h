@@ -51,7 +51,7 @@ private:
 };
 
 /** Entity kind for header display */
-enum class PanelEntityKind { Node, Element, Part, Set, Unknown };
+enum class PanelEntityKind { Node, Element, Part, Set, Material, Section, Unknown };
 
 /** Resolve panel type + id/name to entity. Returns entt::null if not found. */
 entt::entity resolve_panel_entity(entt::registry& reg, SimdroidInspector* insp,
