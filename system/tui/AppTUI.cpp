@@ -151,6 +151,7 @@ void run_app_tui(AppSession& session) {
     struct PartListRow {
         std::string name;
         std::string material;
+        std::string property;
         std::size_t elem_count;
     };
     std::vector<PartListRow> part_rows;
@@ -408,7 +409,11 @@ void run_app_tui(AppSession& session) {
             if (reg.valid(part.material) && reg.all_of<::Component::SetName>(part.material)) {
                 mat_name = reg.get<::Component::SetName>(part.material).value;
             }
-            part_rows.push_back(PartListRow{ part.name, std::move(mat_name), count });
+            std::string prop_name = "-";
+            if (reg.valid(part.section) && reg.all_of<::Component::SetName>(part.section)) {
+                prop_name = reg.get<::Component::SetName>(part.section).value;
+            }
+            part_rows.push_back(PartListRow{ part.name, std::move(mat_name), std::move(prop_name), count });
         }
         std::sort(part_rows.begin(), part_rows.end(),
             [](const PartListRow& a, const PartListRow& b) { return a.name < b.name; });
@@ -576,6 +581,7 @@ void run_app_tui(AppSession& session) {
         Element header_row = hbox({
             text(" Part ") | bold, text(" | "),
             text(" Material ") | bold, text(" | "),
+            text(" Property ") | bold, text(" | "),
             text(" Elements ") | bold,
         }) | color(Color::Cyan);
 
@@ -585,6 +591,8 @@ void run_app_tui(AppSession& session) {
                 text(" " + r.name + " ") | color(Color::Cyan),
                 text(" | "),
                 text(" " + r.material + " ") | color(Color::YellowLight),
+                text(" | "),
+                text(" " + r.property + " ") | color(Color::GreenLight),
                 text(" | "),
                 text(" " + std::to_string(r.elem_count) + " "),
             });
