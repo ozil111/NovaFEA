@@ -18,15 +18,16 @@ if(MSVC)
     add_definitions(-D_USE_MATH_DEFINES)
 endif()
 
-# MinGW specific settings: support large object files
-if(MINGW OR (WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
+# MinGW ABI on Windows (GCC or Clang): support for large object files
+if(WIN32 AND NOT MSVC)
     add_compile_options(-Wa,-mbig-obj)
 endif()
 
-# Add compile definitions
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    add_compile_options(-Wno-invalid-consteval)
+endif()
+
 add_compile_definitions(
-    SPDLOG_HEADER_ONLY 
-    FMT_HEADER_ONLY
     ENTT_ID_TYPE=std::uint64_t
 )
 
@@ -54,10 +55,10 @@ add_executable(test_json_exporter
     ${SYSTEM_SOURCES}
 )
 
-# Link libraries
-target_link_libraries(test_assembly_system
-    spdlog::spdlog
-    fmt::fmt
+# Link libraries (match parent: header-only spdlog/fmt only)
+target_link_libraries(test_assembly_system PRIVATE
+    fmt::fmt-header-only
+    spdlog::spdlog_header_only
     Eigen3::Eigen
     nlohmann_json::nlohmann_json
     EnTT::EnTT
@@ -68,9 +69,9 @@ target_link_libraries(test_assembly_system
     GTest::gtest_main
 )
 
-target_link_libraries(test_json_exporter
-    spdlog::spdlog
-    fmt::fmt
+target_link_libraries(test_json_exporter PRIVATE
+    fmt::fmt-header-only
+    spdlog::spdlog_header_only
     Eigen3::Eigen
     nlohmann_json::nlohmann_json
     EnTT::EnTT

@@ -8,7 +8,7 @@
  */
 #pragma once
 
-#include "entt/entt.hpp"
+#include <entt/entt.hpp>
 
 /**
  * @brief Compute lumped mass for C3D8R (8-node hexahedron) elements

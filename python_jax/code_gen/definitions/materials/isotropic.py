@@ -39,5 +39,13 @@ class Isotropic(Material):
         outputs_subd = [expr.subs(subs_map) for expr in D_flat]
         model_name = f"{self.name}_D"
         
-        return MathModel(inputs=in_syms, outputs=outputs_subd, name=model_name, input_names=[str(p) for p in mat_params])
+        output_names = [f"D_{i}_{j}" for i in range(6) for j in range(6)]
+        
+        return MathModel(
+            inputs=in_syms, 
+            outputs=outputs_subd, 
+            name=model_name, 
+            input_names=[str(p) for p in mat_params],
+            output_names=output_names
+        )
 

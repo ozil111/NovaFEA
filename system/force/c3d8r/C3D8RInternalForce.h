@@ -8,7 +8,7 @@
  */
 #pragma once
 
-#include "entt/entt.hpp"
+#include <entt/entt.hpp>
 
 /**
  * @brief Compute and scatter internal forces for a single C3D8R element

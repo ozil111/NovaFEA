@@ -11,7 +11,7 @@
 #include "../../data_center/components/property_components.h"
 #include "c3d8r/C3D8RInternalForce.h"
 #include "tet4/Tet4InternalForce.h"
-#include "spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 
 void InternalForceSystem::reset_internal_forces(entt::registry& registry) {
     auto node_view = registry.view<Component::InternalForce>();

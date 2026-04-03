@@ -10,7 +10,7 @@
 #include "../../data_center/components/mesh_components.h"
 #include "../../data_center/components/load_components.h"
 #include "../curve/CurveSystem.h"
-#include "spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 #include <algorithm>
 #include <cctype>
 

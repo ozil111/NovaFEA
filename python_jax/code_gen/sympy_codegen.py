@@ -1,4 +1,5 @@
 import sympy as sp
+from sympy.core.relational import Relational
 from sympy.printing.c import C99CodePrinter
 from sympy.printing.fortran import FCodePrinter
 from sympy.printing.numpy import JaxPrinter
@@ -12,6 +13,40 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.resolve()))
 
 from definitions.abc import Element, Material
+
+
+# ---------------------------------------------------------------------------
+# 辅助数据结构：用于 CSE 结果缓存和跨后端共享
+# ---------------------------------------------------------------------------
+class LoweredChunk:
+    """单个 chunk 的 CSE 结果"""
+    def __init__(self, chunk_index: int, start_index: int, sub_exprs: list, simplified_outputs: list):
+        self.chunk_index = chunk_index
+        self.start_index = start_index
+        self.sub_exprs = sub_exprs  # list of (Symbol, Expr)
+        self.simplified_outputs = simplified_outputs  # list of Expr
+
+
+class LoweredModel:
+    """整个模型经过 CSE lowering 后的结果"""
+    def __init__(self, model_name: str, chunk_size: int, chunks: list):
+        self.model_name = model_name
+        self.chunk_size = chunk_size
+        self.chunks = chunks  # list of LoweredChunk
+
+
+class CachedPrinter:
+    """带 memo cache 的 printer 封装器"""
+    def __init__(self, printer):
+        self.printer = printer
+        self.cache = {}
+
+    def doprint(self, expr):
+        if expr in self.cache:
+            return self.cache[expr]
+        result = self.printer.doprint(expr)
+        self.cache[expr] = result
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +121,20 @@ class FEAFortranPrinter(FCodePrinter):
         settings.update({"standard": 95, "source_format": "free"})
         super().__init__(settings)
 
+    def _print_Piecewise(self, expr):
+        # Ensure integer default values in Piecewise are printed as double precision
+        # to avoid type mismatch in the Fortran merge() intrinsic.
+        if expr.args[-1].cond == True:
+            default = expr.args[-1].expr
+            if default.is_Integer:
+                result = f"{float(default)}d0"
+            else:
+                result = self._print(default)
+            for e, c in reversed(expr.args[:-1]):
+                result = "merge(%s, %s, %s)" % (self._print(e), result, self._print(c))
+            return result
+        return super()._print_Piecewise(expr)
+
     def _print_Float(self, expr):
         # Keep all floating constants in double precision.
         res = super()._print_Float(expr)
@@ -94,6 +143,7 @@ class FEAFortranPrinter(FCodePrinter):
     def _print_Pow(self, expr):
         base, exp = expr.as_base_exp()
         s_base = self._print(base)
+        s_exp = self._print(exp)
 
         # Integer powers
         if exp.is_Integer:
@@ -117,59 +167,236 @@ class FEAFortranPrinter(FCodePrinter):
         if abs(val + 0.5) < 1e-9:
             return f"(1.0d0 / sqrt({s_base}))"
         if abs(val - 1.0 / 3.0) < 1e-7:
-            return f"cbrt({s_base})"
+            return f"({s_base}**(1.0d0/3.0d0))"
+        if abs(val + 1.0 / 3.0) < 1e-7:
+            return f"(1.0d0 / ({s_base}**(1.0d0/3.0d0)))"
+        if abs(val - 2.0 / 3.0) < 1e-7:
+            return f"({s_base}**(2.0d0/3.0d0))"
+        if abs(val + 2.0 / 3.0) < 1e-7:
+            return f"(1.0d0 / ({s_base}**(2.0d0/3.0d0)))"
+        if abs(val - 5.0 / 6.0) < 1e-7:
+            return f"({s_base}**(5.0d0/6.0d0))"
+        if abs(val + 5.0 / 6.0) < 1e-7:
+            return f"(1.0d0 / ({s_base}**(5.0d0/6.0d0)))"
 
-        return f"({s_base}**{self._print(exp)})"
+        # Parenthesize the exponent to preserve precedence in Fortran.
+        return f"({s_base}**({s_exp}))"
 
 
 class MathModel:
     """数据容器：存储数学定义"""
-    def __init__(self, inputs, outputs, name="kernel", input_names=None, is_operator=False):
+    def __init__(self, inputs, outputs, name="kernel", input_names=None, output_names=None, is_operator=False):
         self.inputs = inputs   # SymPy 符号列表
         self.outputs = outputs # SymPy 表达式列表
         self.name = name
         self.input_names = input_names or [str(s) for s in inputs]
+        self.output_names = output_names or [f"out[{i}]" for i in range(len(outputs))]
         self.is_operator = is_operator # 是否作为算子生成（可能包含SIMD优化等）
 
 
 class FEACompiler:
+    # =========================================================================
+    # 公共 Lower 阶段：将 MathModel 转换为 LoweredModel，执行 CSE
+    # =========================================================================
     @staticmethod
-    def compile(model: MathModel, target: str):
+    def lower_model(model: MathModel, chunk_size: int) -> LoweredModel:
+        """执行 CSE lowering，返回可被多个后端共享的 LoweredModel"""
+        outputs = model.outputs
+        chunks = []
+        
+        for start in range(0, len(outputs), chunk_size):
+            chunk_index = start // chunk_size
+            chunk = outputs[start:start + chunk_size]
+            sub_exprs, simplified_chunk = sp.cse(
+                chunk,
+                symbols=sp.numbered_symbols(f"v_{chunk_index}_")
+            )
+            chunks.append(
+                LoweredChunk(
+                    chunk_index=chunk_index,
+                    start_index=start,
+                    sub_exprs=sub_exprs,
+                    simplified_outputs=simplified_chunk
+                )
+            )
+        
+        return LoweredModel(model.name, chunk_size, chunks)
+    
+    # =========================================================================
+    # Chunk Size 策略：根据模型规模和目标平台决定 chunk size
+    # =========================================================================
+    @staticmethod
+    def resolve_chunk_size(model: MathModel, target: str, user_chunk_size=None, strategy="auto") -> int:
         """
-        核心分发器：输入 MathModel + target，输出 cpp/cuda/jax/peachpy/fortran 源码字符串。
-        target: 'jax', 'cpp', 'cuda', 'peachpy', 'fortran'
+        决定 CSE chunk size 的策略。
+        
+        Args:
+            model: 数学模型
+            target: 目标平台 (jax/cpp/cuda/fortran等)
+            user_chunk_size: 用户通过 CLI 指定的 chunk size
+            strategy: 策略模式 ("auto" 或 "fixed")
+        
+        Returns:
+            最终的 chunk size
+        """
+        if user_chunk_size is not None:
+            return user_chunk_size
+        
+        nout = len(model.outputs)
+        target = target.lower()
+        
+        # fixed 模式：使用各后端的固定默认值
+        if strategy == "fixed":
+            if target == "jax":
+                return 50
+            if target in ("cpp", "c++", "cuda", "fortran"):
+                return 24
+            return 24
+        
+        # auto 模式：根据输出规模自动调整
+        if strategy == "auto":
+            if target == "jax":
+                if nout <= 64:
+                    return 64
+                elif nout <= 256:
+                    return 48
+                else:
+                    return 32
+            
+            # cpp/cuda/fortran 的自适应策略
+            if nout <= 32:
+                return 32
+            elif nout <= 128:
+                return 24
+            elif nout <= 512:
+                return 16
+            else:
+                return 8
+        
+        raise ValueError(f"Unknown strategy: {strategy}")
+    
+    # =========================================================================
+    # C++/CUDA 兼容性宏：跨平台支持 GCC/Clang/MSVC/CUDA
+    # =========================================================================
+    @staticmethod
+    def _cpp_cuda_compat_macros() -> str:
+        """返回统一的 C++/CUDA 跨平台兼容性宏定义"""
+        return r"""
+#if defined(__CUDACC__)
+  #define FEA_DEVICE __device__
+  #define FEA_HOST __host__
+  #define FEA_HOST_DEVICE __host__ __device__
+  #define FEA_RESTRICT __restrict__
+#else
+  #define FEA_DEVICE
+  #define FEA_HOST
+  #define FEA_HOST_DEVICE
+  #if defined(_WIN32) || defined(_WIN64)
+    #if defined(_MSC_VER)
+      #define FEA_RESTRICT __restrict
+    #else
+      #define FEA_RESTRICT __restrict__
+    #endif
+  #else
+    #if defined(__GNUC__) || defined(__clang__)
+      #define FEA_RESTRICT __restrict__
+    #else
+      #define FEA_RESTRICT
+    #endif
+  #endif
+#endif
+
+#if defined(_MSC_VER)
+  #define FEA_ALWAYS_INLINE __forceinline
+#elif defined(__GNUC__) || defined(__clang__)
+  #define FEA_ALWAYS_INLINE inline __attribute__((always_inline))
+#else
+  #define FEA_ALWAYS_INLINE inline
+#endif
+"""
+    
+    # =========================================================================
+    # 核心编译接口
+    # =========================================================================
+    @staticmethod
+    def compile(model: MathModel, target: str, chunk_size=None, cse_strategy="auto", lowered=None):
+        """
+        核心分发器：输入 MathModel + target，输出 cpp/cuda/jax/fortran 源码字符串。
+        
+        Args:
+            model: 数学模型
+            target: 目标平台 ('jax', 'cpp', 'cuda', 'fortran')
+            chunk_size: 用户指定的 chunk size (可选)
+            cse_strategy: CSE 策略 ('auto' 或 'fixed')
+            lowered: 预先 lowered 的结果 (可选，用于多后端共享)
         """
         target = target.lower()
         if target == 'jax':
-            return FEACompiler._to_jax(model)
+            return FEACompiler._to_jax(model, lowered=lowered, chunk_size=chunk_size, cse_strategy=cse_strategy)
         elif target in ['cpp', 'c++']:
-            return FEACompiler._to_source(model, is_cuda=False)
+            return FEACompiler._to_source(model, is_cuda=False, lowered=lowered, 
+                                         chunk_size=chunk_size, cse_strategy=cse_strategy)
         elif target == 'cuda':
-            return FEACompiler._to_source(model, is_cuda=True)
-        elif target == 'peachpy':
-            return FEACompiler._to_peachpy(model)
+            return FEACompiler._to_source(model, is_cuda=True, lowered=lowered,
+                                         chunk_size=chunk_size, cse_strategy=cse_strategy)
         elif target == 'fortran':
-            return FEACompiler._to_fortran(model)
+            return FEACompiler._to_fortran(model, lowered=lowered,
+                                          chunk_size=chunk_size, cse_strategy=cse_strategy)
         else:
             raise ValueError(f"Unknown target: {target}")
 
     @staticmethod
-    def compile_all(model: MathModel):
-        """一次性生成 jax/cpp/cuda/peachpy/fortran 五种目标源码。"""
+    def compile_all(model: MathModel, chunk_size=None, cse_strategy="auto"):
+        """
+        一次性生成 jax/cpp/cuda/fortran 四种目标源码。
+        
+        统一管理 lower 行为：
+        - 如果所有 target 使用相同的 chunk size，共享一份 lowered
+        - 如果 JAX 和 cpp/cuda/fortran 使用不同的 chunk size，分别生成 jax_lowered 和 shared_lowered
+        
+        Args:
+            model: 数学模型
+            chunk_size: 用户指定的 chunk size (可选)
+            cse_strategy: CSE 策略 ('auto' 或 'fixed')
+        
+        Returns:
+            dict: {'jax': code, 'cpp': code, 'cuda': code, 'fortran': code}
+        """
+        # 决定各 target 的 chunk size
+        cpp_chunk = FEACompiler.resolve_chunk_size(model, "cpp", chunk_size, cse_strategy)
+        jax_chunk = FEACompiler.resolve_chunk_size(model, "jax", chunk_size, cse_strategy)
+        
+        # 生成 shared lowered 给 cpp/cuda/fortran
+        shared_lowered = FEACompiler.lower_model(model, cpp_chunk)
+        
+        # 决定 JAX 是否共享 lowered
+        if jax_chunk == cpp_chunk:
+            jax_lowered = shared_lowered
+        else:
+            jax_lowered = FEACompiler.lower_model(model, jax_chunk)
+        
         return {
-            "jax": FEACompiler._to_jax(model),
-            "cpp": FEACompiler._to_source(model, is_cuda=False),
-            "cuda": FEACompiler._to_source(model, is_cuda=True),
-            "peachpy": FEACompiler._to_peachpy(model),
-            "fortran": FEACompiler._to_fortran(model),
+            "jax": FEACompiler._to_jax(model, lowered=jax_lowered, chunk_size=jax_chunk, cse_strategy=cse_strategy),
+            "cpp": FEACompiler._to_source(model, is_cuda=False, lowered=shared_lowered, chunk_size=cpp_chunk, cse_strategy=cse_strategy),
+            "cuda": FEACompiler._to_source(model, is_cuda=True, lowered=shared_lowered, chunk_size=cpp_chunk, cse_strategy=cse_strategy),
+            "fortran": FEACompiler._to_fortran(model, lowered=shared_lowered, chunk_size=cpp_chunk, cse_strategy=cse_strategy),
         }
 
     @staticmethod
-    def _to_jax(model):
-        """生成 JAX 源码（.py），采用分块 CSE 优化。"""
-        # 对于 JAX，分块大小可以稍微大一点
-        chunk_size = 50
-        outputs = model.outputs
+    def _to_jax(model, lowered=None, chunk_size=None, cse_strategy="auto"):
+        """
+        生成 JAX 源码（.py），采用分块 CSE 优化。
+        
+        Args:
+            model: 数学模型
+            lowered: 预先 lowered 的 LoweredModel (可选，用于多后端共享)
+            chunk_size: 用户指定的 chunk size (可选)
+            cse_strategy: CSE 策略 ('auto' 或 'fixed')
+        """
+        # 如果没有提供 lowered 结果，则自行 lower
+        if lowered is None:
+            chunk_size = FEACompiler.resolve_chunk_size(model, "jax", chunk_size, cse_strategy)
+            lowered = FEACompiler.lower_model(model, chunk_size)
         
         lines = [
             '"""Generated by sympy_codegen.py. Do not edit."""',
@@ -177,8 +404,30 @@ class FEACompiler:
             "",
             "",
             f"def compute_{model.name}(in_flat):",
-            f'    """in_flat: 扁平化输入, size {len(model.inputs)}。返回 {len(model.outputs)} 个元素。"""',
+            f'    """',
+            f'    Compute the {model.name} kernel.',
+            f'    ',
+            f'    Args:',
+            f'        in_flat: Flattened input array, size {len(model.inputs)}',
+            f'    ',
+            f'    Returns:',
+            f'        Flattened output array, size {len(model.outputs)}',
+            f'    ',
+            f'    Input layout:',
         ]
+        
+        # 添加输入信息
+        for i, name in enumerate(model.input_names):
+            lines.append(f"    '       - in_flat[{i}]: {name}")
+        
+        lines.append(f"    '")
+        lines.append(f"    '    Output layout:")
+        
+        # 添加输出信息
+        for i, name in enumerate(model.output_names):
+            lines.append(f"    '       - out[{i}]: {name}")
+        
+        lines.append(f'    """')
         
         # Unpack inputs IF they are valid identifiers (e.g. xi, c0)
         # If they are like "in[0]", we'll handle them via string replacement later
@@ -191,17 +440,15 @@ class FEACompiler:
         
         lines.append("")
         
-        printer = JaxPrinter()
+        printer = CachedPrinter(JaxPrinter())
         all_simplified_outputs = []
         
-        for i in range(0, len(outputs), chunk_size):
-            chunk = outputs[i:i + chunk_size]
-            sub_exprs, simplified_chunk = sp.cse(chunk, symbols=sp.numbered_symbols(f"v_{i//chunk_size}_"))
-            
-            for var, expr in sub_exprs:
+        # 使用 lowered 结果
+        for chunk in lowered.chunks:
+            for var, expr in chunk.sub_exprs:
                 lines.append(f"    {var} = {printer.doprint(expr)}")
             
-            all_simplified_outputs.extend(simplified_chunk)
+            all_simplified_outputs.extend(chunk.simplified_outputs)
 
         lines.append("")
         lines.append("    # --- Output ---")
@@ -214,10 +461,22 @@ class FEACompiler:
         return src
 
     @staticmethod
-    def _to_source(model, is_cuda=False):
-        """生成 C++/CUDA 源码，采用分块 CSE 优化及算子化增强。"""
-        chunk_size = 24 # 默认分块大小，对应一行（对于 24x24 矩阵）
-        outputs = model.outputs
+    def _to_source(model, is_cuda=False, lowered=None, chunk_size=None, cse_strategy="auto"):
+        """
+        生成 C++/CUDA 源码，采用分块 CSE 优化及算子化增强。
+        
+        Args:
+            model: 数学模型
+            is_cuda: 是否为 CUDA 目标
+            lowered: 预先 lowered 的 LoweredModel (可选，用于多后端共享)
+            chunk_size: 用户指定的 chunk size (可选)
+            cse_strategy: CSE 策略 ('auto' 或 'fixed')
+        """
+        # 如果没有提供 lowered 结果，则自行 lower
+        if lowered is None:
+            chunk_size = FEACompiler.resolve_chunk_size(model, "cuda" if is_cuda else "cpp", 
+                                                       chunk_size, cse_strategy)
+            lowered = FEACompiler.lower_model(model, chunk_size)
         
         # --- Generate Comments ---
         comment_lines = ["/**"]
@@ -232,212 +491,150 @@ class FEACompiler:
 
         comment_lines.append(" * ")
         comment_lines.append(" * @param out Output array (double*). Layout:")
-        comment_lines.append(f" *   - out[0..{len(model.outputs)-1}]: Flattened result, row-major order.")
+        
+        # 列出每个输出的详细信息
+        for i, name in enumerate(model.output_names):
+            comment_lines.append(f" *   - out[{i}]: {name}")
+        
         comment_lines.append(" */")
         comment_block = "\n".join(comment_lines)
 
         # --- Generate Function Body ---
         body_lines = []
-        
-        # 初始化自定义 Printer
-        printer = FEACodePrinter()
 
-        all_simplified_outputs = []
-        
-        for i in range(0, len(outputs), chunk_size):
-            chunk = outputs[i:i + chunk_size]
-            # 使用带编号的符号避免冲突
-            sub_exprs, simplified_chunk = sp.cse(chunk, symbols=sp.numbered_symbols(f"v_{i//chunk_size}_"))
+        # 解包输入变量
+        for i, sym in enumerate(model.inputs):
+            s = str(sym)
+            # 检查是否是合法标识符（如 coord_2_3），如果是则解包
+            if s.isidentifier():
+                body_lines.append(f"    double {s} = in[{i}];")
+
+        body_lines.append("")
+
+        # 初始化带缓存的 Printer
+        printer = CachedPrinter(FEACodePrinter())
+
+        # 使用 lowered 结果
+        for chunk in lowered.chunks:
+            body_lines.append(f"\n    // --- Chunk {chunk.chunk_index} ---")
             
-            body_lines.append(f"\n    // --- Chunk {i//chunk_size} ---")
-            for var, expr in sub_exprs:
+            for var, expr in chunk.sub_exprs:
                 body_lines.append(f"    double {var} = {printer.doprint(expr)};")
             
-            for j, out_expr in enumerate(simplified_chunk):
-                body_lines.append(f"    out[{i + j}] = {printer.doprint(out_expr)};")
+            for j, out_expr in enumerate(chunk.simplified_outputs):
+                body_lines.append(f"    out[{chunk.start_index + j}] = {printer.doprint(out_expr)};")
 
-        func_type = "__device__ void" if is_cuda else "inline void"
-        if not is_cuda:
-             # 添加编译器特定的向量化提示
-             func_type = "[[gnu::always_inline]] " + func_type
-        
         body = "\n".join(body_lines)
         
-        return f"{comment_block}\n{func_type} compute_{model.name}(const double* __restrict__ in, double* __restrict__ out) {{ \n{body}\n}}"
-
-    @staticmethod
-    def _to_peachpy(model):
-        """生成 PeachPy 源码 (.py)"""
-        class PeachPyEmitter:
-            def __init__(self, model):
-                self.model = model
-                self.model_name = model.name
-                self.lines = [
-                    '"""Generated by sympy_codegen.py. Do not edit."""',
-                    "from peachpy import *",
-                    "from peachpy.x86_64 import *",
-                    "import re",
-                    "",
-                    "in_ptr = Argument(ptr(const_double_), name=\"in\")",
-                    "out_ptr = Argument(ptr(double_), name=\"out\")",
-                    "",
-                    f"with Function(\"compute_{self.model_name}\", (in_ptr, out_ptr)) as function:",
-                    "    reg_in = GeneralPurposeRegister64()",
-                    "    reg_out = GeneralPurposeRegister64()",
-                    "    LOAD.ARGUMENT(reg_in, in_ptr)",
-                    "    LOAD.ARGUMENT(reg_out, out_ptr)",
-                    "",
-                    "    # Cache for input variables and constants",
-                    "    v_map = {} # sym_obj -> register_name",
-                    "    constants = {} # value -> register_name",
-                    ""
-                ]
-                self.v_map = {} # sym_obj -> register_name
-                self.constants = {}
-                self.tmp_by_depth = {}
-
-            def get_reg(self, sym, is_new=False):
-                if sym not in self.v_map or is_new:
-                    reg_name = f"v_{len(self.v_map)}"
-                    self.lines.append(f"    {reg_name} = XMMRegister()")
-                    self.v_map[sym] = reg_name
-                return self.v_map[sym]
-
-            def handle_const(self, val):
-                val_f = float(val)
-                if val_f not in self.constants:
-                    reg = f"c_{len(self.constants)}"
-                    self.lines.append(f"    {reg} = XMMRegister()")
-                    self.lines.append(f"    MOVSD({reg}, Constant.float64({val_f}))")
-                    self.constants[val_f] = reg
-                return self.constants[val_f]
-
-            def get_val_code(self, val):
-                if val.is_Number:
-                    return self.handle_const(val)
-                
-                if val in self.v_map:
-                    return self.v_map[val]
-                
-                s_val = str(val)
-                # Check for in[i] pattern
-                if s_val.startswith("in["):
-                    idx_str = s_val[3:-1]
-                    if idx_str.isdigit():
-                        return f"[reg_in + {int(idx_str)*8}]"
-
-                import re
-                match = re.match(r"in\[(\d+)\]", s_val)
-                if match:
-                    idx = int(match.group(1))
-                    return f"[reg_in + {idx*8}]"
-
-                # Check named inputs
-                for idx, inp in enumerate(self.model.inputs):
-                    if inp == val or str(inp) == s_val:
-                        return f"[reg_in + {idx*8}]"
-                
-                return f"None # Error: {s_val} not found"
-
-            def emit(self, line):
-                self.lines.append(f"    {line}")
-
-            def get_tmp(self, depth):
-                if depth not in self.tmp_by_depth:
-                    reg_name = f"tmp_d{depth}"
-                    self.lines.append(f"    {reg_name} = XMMRegister()")
-                    self.tmp_by_depth[depth] = reg_name
-                return self.tmp_by_depth[depth]
-
-            def finalize(self):
-                self.lines.append("    RETURN()")
-                self.lines.append("")
-                return "\n".join(self.lines)
-
-        emitter = PeachPyEmitter(model)
-        outputs = model.outputs
+        # 统一使用兼容宏体系
+        prefix = FEACompiler._cpp_cuda_compat_macros() + "\n"
         
-        def _emit_recursive(e, target, depth=0):
-            if e.is_Number or e.is_Symbol:
-                emitter.emit(f"MOVSD({target}, {emitter.get_val_code(e)})")
-            elif isinstance(e, sp.Add):
-                _emit_recursive(e.args[0], target, depth)
-                for a in e.args[1:]:
-                    if a.is_Number or a.is_Symbol:
-                        emitter.emit(f"ADDSD({target}, {emitter.get_val_code(a)})")
-                    else:
-                        tmp = emitter.get_tmp(depth + 1)
-                        _emit_recursive(a, tmp, depth + 1)
-                        emitter.emit(f"ADDSD({target}, {tmp})")
-            elif isinstance(e, sp.Mul):
-                _emit_recursive(e.args[0], target, depth)
-                for a in e.args[1:]:
-                    if a.is_Number or a.is_Symbol:
-                        emitter.emit(f"MULSD({target}, {emitter.get_val_code(a)})")
-                    else:
-                        tmp = emitter.get_tmp(depth + 1)
-                        _emit_recursive(a, tmp, depth + 1)
-                        emitter.emit(f"MULSD({target}, {tmp})")
-            elif isinstance(e, sp.Pow) and e.args[1] == 2:
-                _emit_recursive(e.args[0], target, depth)
-                emitter.emit(f"MULSD({target}, {target})")
-            elif isinstance(e, sp.Pow) and e.args[1] == -1:
-                emitter.emit(f"MOVSD({target}, {emitter.handle_const(1.0)})")
-                if e.args[0].is_Number or e.args[0].is_Symbol:
-                    emitter.emit(f"DIVSD({target}, {emitter.get_val_code(e.args[0])})")
-                else:
-                    tmp = emitter.get_tmp(depth + 1)
-                    _emit_recursive(e.args[0], tmp, depth + 1)
-                    emitter.emit(f"DIVSD({target}, {tmp})")
-            else:
-                emitter.emit(f"# Warning: Unsupported expression: {e}")
+        if is_cuda:
+            # CUDA 使用 FEA_DEVICE 宏
+            func_type = "FEA_DEVICE FEA_ALWAYS_INLINE void"
+            signature = f"{func_type} compute_{model.name}(const double* FEA_RESTRICT in, double* FEA_RESTRICT out)"
+        else:
+            # C++ 使用 FEA_ALWAYS_INLINE 宏
+            func_type = "FEA_ALWAYS_INLINE void"
+            signature = f"{func_type} compute_{model.name}(const double* FEA_RESTRICT in, double* FEA_RESTRICT out)"
+        
+        return f"{prefix}{comment_block}\n{signature} {{ \n{body}\n}}"
 
-        tmp_out = emitter.get_tmp(0)
-        for j, out_expr in enumerate(outputs):
-            _emit_recursive(out_expr, tmp_out, 0)
-            emitter.emit(f"MOVSD([reg_out + {j*8}], {tmp_out})")
 
-        return emitter.finalize()
 
     @staticmethod
-    def _to_fortran(model):
-        """生成 Fortran 源码，支持分块 CSE 优化。"""
-        chunk_size = 24
-        outputs = model.outputs
-        printer = FEAFortranPrinter()
+    def _to_fortran(model, lowered=None, chunk_size=None, cse_strategy="auto"):
+        """生成 Fortran 源码,支持分块 CSE 优化。声明和赋值必须分离。"""
+        # 如果没有提供 lowered 结果，则自行 lower
+        if lowered is None:
+            chunk_size = FEACompiler.resolve_chunk_size(model, "fortran", chunk_size, cse_strategy)
+            lowered = FEACompiler.lower_model(model, chunk_size)
+        
+        printer = CachedPrinter(FEAFortranPrinter())
 
         lines = [
             "! Generated by sympy_codegen.py. Do not edit.",
+            "!",
+            f"! Subroutine: compute_{model.name}",
+            "!",
+            "! Input array layout (in_vec):",
+        ]
+        
+        # 添加输入信息
+        for i, name in enumerate(model.input_names):
+            lines.append(f"!   in_vec({i + 1}): {name}")
+        
+        lines.append("!")
+        lines.append("! Output array layout (out_vec):")
+        
+        # 添加输出信息
+        for i, name in enumerate(model.output_names):
+            lines.append(f"!   out_vec({i + 1}): {name}")
+        
+        lines.extend([
+            "!",
             f"subroutine compute_{model.name}(in_vec, out_vec)",
             "    implicit none",
             f"    double precision, intent(in)  :: in_vec({len(model.inputs)})",
             f"    double precision, intent(out) :: out_vec({len(model.outputs)})",
-            "    ! --- Local Variables for CSE ---",
-        ]
+            "    ! --- Unpack inputs ---",
+        ])
 
-        for i in range(0, len(outputs), chunk_size):
-            chunk = outputs[i:i + chunk_size]
-            sub_exprs, simplified_chunk = sp.cse(chunk, symbols=sp.numbered_symbols(f"v_{i//chunk_size}_"))
+        # Unpack input array to named variables
+        input_vars = []
+        for i, sym in enumerate(model.inputs):
+            s = str(sym)
+            if s.isidentifier():
+                input_vars.append(s)
 
-            lines.append(f"    ! Chunk {i//chunk_size}")
-            if sub_exprs:
+        # First, declare all input variables
+        if input_vars:
+            lines.append(f"    double precision :: {', '.join(input_vars)}")
+
+        # Then assign values
+        for i, sym in enumerate(model.inputs):
+            s = str(sym)
+            if s.isidentifier():
+                lines.append(f"    {s} = in_vec({i + 1})")
+
+        lines.append("    ! --- Local Variables for CSE ---")
+
+        # 使用 lowered 结果
+        for chunk in lowered.chunks:
+            lines.append(f"    ! Chunk {chunk.chunk_index}")
+            if chunk.sub_exprs:
                 lines.append("    block")
-                for var, expr in sub_exprs:
-                    lines.append(f"        double precision :: {var}")
+
+                # Separate variables by type: logical for comparisons, double precision otherwise
+                dp_vars = []
+                log_vars = []
+                for var, expr in chunk.sub_exprs:
+                    if isinstance(expr, Relational):
+                        log_vars.append(str(var))
+                    else:
+                        dp_vars.append(str(var))
+
+                if dp_vars:
+                    lines.append(f"        double precision :: {', '.join(dp_vars)}")
+                if log_vars:
+                    lines.append(f"        logical :: {', '.join(log_vars)}")
+
+                # Then assign values
+                for var, expr in chunk.sub_exprs:
                     lines.append(f"        {var} = {printer.doprint(expr)}")
 
-            for j, out_expr in enumerate(simplified_chunk):
+            for j, out_expr in enumerate(chunk.simplified_outputs):
                 # Fortran arrays are 1-based.
-                lines.append(f"        out_vec({i + j + 1}) = {printer.doprint(out_expr)}")
+                lines.append(f"        out_vec({chunk.start_index + j + 1}) = {printer.doprint(out_expr)}")
 
-            if sub_exprs:
+            if chunk.sub_exprs:
                 lines.append("    end block")
 
         lines.append(f"end subroutine compute_{model.name}")
         return "\n".join(lines)
 
     @staticmethod
-    def compile_element(element: Element, target: str):
+    def compile_element(element: Element, target: str, chunk_size=None, cse_strategy="auto"):
         """
         Special compiler for Elements: supports both single-kernel and operator-based generation.
         """
@@ -446,12 +643,14 @@ class FEACompiler:
             # Generate multiple operator kernels
             generated = {}
             for op_model in operators:
-                generated[op_model.name] = FEACompiler.compile(op_model, target)
+                generated[op_model.name] = FEACompiler.compile(op_model, target, 
+                                                               chunk_size=chunk_size, cse_strategy=cse_strategy)
             return generated
         else:
             # Traditional single kernel
             model = element.get_stiffness_model()
-            return {model.name: FEACompiler.compile(model, target)}
+            return {model.name: FEACompiler.compile(model, target, 
+                                                   chunk_size=chunk_size, cse_strategy=cse_strategy)}
 
 
 # ---------------------------------------------------------------------------
@@ -486,8 +685,6 @@ def _default_output(model_name: str, target: str) -> str:
         return f"{model_name}_gen.cpp"
     if t == "cuda":
         return f"{model_name}_gen.cu"
-    if t == "peachpy":
-        return f"{model_name}_peachpy.py"
     if t == "fortran":
         return f"{model_name}_gen.f90"
     return f"{model_name}_{t}.txt"
@@ -517,13 +714,25 @@ def main():
     parser.add_argument(
         "--target", "-t",
         required=True,
-        choices=["jax", "cpp", "cuda", "peachpy", "fortran", "all"],
-        help="目标语言：jax / cpp / cuda / peachpy / fortran / all",
+        choices=["jax", "cpp", "cuda", "fortran", "all"],
+        help="目标语言：jax / cpp / cuda / fortran / all",
     )
     parser.add_argument(
         "--output", "-o",
         default=None,
         help="输出文件路径（默认根据任务和名称生成）",
+    )
+    parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=None,
+        help="CSE chunk size. 如果省略，则使用 cse-strategy 决定。",
+    )
+    parser.add_argument(
+        "--cse-strategy",
+        choices=["auto", "fixed"],
+        default="auto",
+        help="CSE chunk sizing 策略。'auto' 根据输出规模自动调整，'fixed' 使用固定默认值。",
     )
     args = parser.parse_args()
 
@@ -581,13 +790,28 @@ def main():
             parser.error(f"get_model() must return a MathModel or a list of MathModels. Got: {type(models)}")
 
     # ---------------- Compile Models ----------------
-    target = args.target
-    targets = ["jax", "cpp", "cuda", "peachpy", "fortran"] if target == "all" else [target]
-    
     for name, model in models_to_compile.items():
-        for t in targets:
-            code = FEACompiler.compile(model, t)
-            out_path = Path(args.output or ".") / _default_output(name, t)
+        if args.target == "all":
+            # --target all: 使用 compile_all 实现真正的共享 CSE
+            generated = FEACompiler.compile_all(
+                model,
+                chunk_size=args.chunk_size,
+                cse_strategy=args.cse_strategy,
+            )
+            for t, code in generated.items():
+                out_path = Path(args.output or ".") / _default_output(name, t)
+                with open(out_path, "w", encoding="utf-8") as f:
+                    f.write(code)
+                print(f"Generated: {out_path}")
+        else:
+            # 单一目标编译
+            code = FEACompiler.compile(
+                model,
+                args.target,
+                chunk_size=args.chunk_size,
+                cse_strategy=args.cse_strategy,
+            )
+            out_path = Path(args.output or ".") / _default_output(name, args.target)
             with open(out_path, "w", encoding="utf-8") as f:
                 f.write(code)
             print(f"Generated: {out_path}")

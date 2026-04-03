@@ -12,7 +12,7 @@
 #include "../../../data_center/components/simdroid_components.h"
 #include "../../../data_center/components/material_components.h"
 #include <Eigen/Dense>
-#include "spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 #include <cmath>
 
 namespace {

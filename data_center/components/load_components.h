@@ -10,7 +10,7 @@
 
 #include <string>
 #include <vector>
-#include "entt/entt.hpp"
+#include <entt/entt.hpp>
 
 /**
  * @namespace Component

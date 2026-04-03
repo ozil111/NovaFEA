@@ -36,6 +36,15 @@ if /i "%~1"=="--msvc-release" (
     set PRESET_NAME=msvc_release
     set BUILD_TYPE=Release
 )
+if /i "%~1"=="--gcc" (
+    set BUILD_MODE=gcc
+    set PRESET_NAME=gcc
+)
+if /i "%~1"=="--gcc-release" (
+    set BUILD_MODE=gcc_release
+    set PRESET_NAME=gcc-release
+    set BUILD_TYPE=Release
+)
 if /i "%~1"=="--test-preset" (
     set USE_TEST_PRESET=1
     set "PRESET_NAME=%~2"
@@ -52,6 +61,13 @@ if %USE_TEST_PRESET%==0 (
             set PRESET_NAME=release
         ) else (
             set PRESET_NAME=default
+        )
+    )
+    if %BUILD_MODE%==gcc (
+        if %BUILD_TYPE%==Release (
+            set PRESET_NAME=gcc-release
+        ) else (
+            set PRESET_NAME=gcc
         )
     )
 )

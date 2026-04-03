@@ -6,7 +6,7 @@
  * Author: Xiaotong Wang (or NovaFEA Team)
  */
 #include "CommandProcessor.h"
-#include "spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 #include "parser_base/parserBase.h"
 #include "parser_json/JsonParser.h"
 #include "exporter_base/exporterBase.h"

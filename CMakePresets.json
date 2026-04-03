@@ -8,9 +8,61 @@
   "configurePresets": [
     {
       "name": "default",
-      "displayName": "Default (Debug, MinGW)",
-      "description": "Debug build using MinGW-w64",
+      "displayName": "Default (Debug, Clang)",
+      "description": "Debug build using Clang/LLVM with Ninja; vcpkg deps built with Clang (x64-mingw-clang-dynamic)",
       "binaryDir": "build/default",
+      "generator": "Ninja",
+      "toolchainFile": "D:/Document/vcpkg/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "D:/Program Files/LLVM/bin/clang.exe",
+        "CMAKE_CXX_COMPILER": "D:/Program Files/LLVM/bin/clang++.exe",
+        "CMAKE_C_COMPILER_TARGET": "x86_64-w64-windows-gnu",
+        "CMAKE_CXX_COMPILER_TARGET": "x86_64-w64-windows-gnu",
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/vcpkg-triplets",
+        "VCPKG_TARGET_TRIPLET": "x64-mingw-clang-dynamic"
+      },
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release (Release, Clang)",
+      "description": "Release build using Clang/LLVM with Ninja; vcpkg deps built with Clang (x64-mingw-clang-dynamic)",
+      "binaryDir": "build/release",
+      "generator": "Ninja",
+      "toolchainFile": "D:/Document/vcpkg/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_COMPILER": "D:/Program Files/LLVM/bin/clang.exe",
+        "CMAKE_CXX_COMPILER": "D:/Program Files/LLVM/bin/clang++.exe",
+        "CMAKE_C_COMPILER_TARGET": "x86_64-w64-windows-gnu",
+        "CMAKE_CXX_COMPILER_TARGET": "x86_64-w64-windows-gnu",
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/vcpkg-triplets",
+        "VCPKG_TARGET_TRIPLET": "x64-mingw-clang-dynamic"
+      },
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "gcc",
+      "displayName": "GCC (Debug, MinGW)",
+      "description": "Debug build using MinGW-w64 GCC (non-default)",
+      "binaryDir": "build/gcc",
       "generator": "MinGW Makefiles",
       "toolchainFile": "D:/Document/vcpkg/scripts/buildsystems/vcpkg.cmake",
       "cacheVariables": {
@@ -30,12 +82,12 @@
       }
     },
     {
-      "name": "release",
-      "displayName": "Release (Release, MinGW)",
-      "description": "Release build using MinGW-w64",
-      "binaryDir": "build/release",
+      "name": "gcc-release",
+      "displayName": "GCC Release (Release, MinGW)",
+      "description": "Release build using MinGW-w64 GCC (non-default)",
+      "binaryDir": "build/gcc-release",
       "generator": "MinGW Makefiles",
-      "toolchainFile": "D:/Document/vcpkg/scripts/buildsystems/vcpkg.cmake", 
+      "toolchainFile": "D:/Document/vcpkg/scripts/buildsystems/vcpkg.cmake",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_C_COMPILER": "gcc",
@@ -104,9 +156,63 @@
     },
     {
       "name": "test-default",
-      "displayName": "Test Default (Debug, MinGW)",
-      "description": "Debug build with tests using MinGW-w64",
+      "displayName": "Test Default (Debug, Clang)",
+      "description": "Debug build with tests using Clang/LLVM with Ninja; vcpkg deps built with Clang (x64-mingw-clang-dynamic)",
       "binaryDir": "build/test-default",
+      "generator": "Ninja",
+      "toolchainFile": "D:/Document/vcpkg/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "D:/Program Files/LLVM/bin/clang.exe",
+        "CMAKE_CXX_COMPILER": "D:/Program Files/LLVM/bin/clang++.exe",
+        "CMAKE_C_COMPILER_TARGET": "x86_64-w64-windows-gnu",
+        "CMAKE_CXX_COMPILER_TARGET": "x86_64-w64-windows-gnu",
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/vcpkg-triplets",
+        "VCPKG_TARGET_TRIPLET": "x64-mingw-clang-dynamic",
+        "BUILD_TESTING": "ON"
+      },
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "test-release",
+      "displayName": "Test Release (Release, Clang)",
+      "description": "Release build with tests using Clang/LLVM with Ninja; vcpkg deps built with Clang (x64-mingw-clang-dynamic)",
+      "binaryDir": "build/test-release",
+      "generator": "Ninja",
+      "toolchainFile": "D:/Document/vcpkg/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_COMPILER": "D:/Program Files/LLVM/bin/clang.exe",
+        "CMAKE_CXX_COMPILER": "D:/Program Files/LLVM/bin/clang++.exe",
+        "CMAKE_C_COMPILER_TARGET": "x86_64-w64-windows-gnu",
+        "CMAKE_CXX_COMPILER_TARGET": "x86_64-w64-windows-gnu",
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/vcpkg-triplets",
+        "VCPKG_TARGET_TRIPLET": "x64-mingw-clang-dynamic",
+        "BUILD_TESTING": "ON"
+      },
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "test-gcc",
+      "displayName": "Test GCC (Debug, MinGW)",
+      "description": "Debug build with tests using MinGW-w64 GCC",
+      "binaryDir": "build/test-gcc",
       "generator": "MinGW Makefiles",
       "toolchainFile": "D:/Document/vcpkg/scripts/buildsystems/vcpkg.cmake",
       "cacheVariables": {
@@ -127,10 +233,10 @@
       }
     },
     {
-      "name": "test-release",
-      "displayName": "Test Release (Release, MinGW)",
-      "description": "Release build with tests using MinGW-w64",
-      "binaryDir": "build/test-release",
+      "name": "test-gcc-release",
+      "displayName": "Test GCC Release (Release, MinGW)",
+      "description": "Release build with tests using MinGW-w64 GCC",
+      "binaryDir": "build/test-gcc-release",
       "generator": "MinGW Makefiles",
       "toolchainFile": "D:/Document/vcpkg/scripts/buildsystems/vcpkg.cmake",
       "cacheVariables": {
@@ -206,15 +312,27 @@
   "buildPresets": [
     {
       "name": "build-default",
-      "displayName": "Build Default",
-      "description": "Build the 'default' configuration",
-      "configurePreset": "default" 
+      "displayName": "Build Default (Clang)",
+      "description": "Build the Clang 'default' configuration",
+      "configurePreset": "default"
     },
     {
       "name": "build-release",
-      "displayName": "Build Release",
-      "description": "Build the 'release' configuration",
-      "configurePreset": "release" 
+      "displayName": "Build Release (Clang)",
+      "description": "Build the Clang 'release' configuration",
+      "configurePreset": "release"
+    },
+    {
+      "name": "build-gcc",
+      "displayName": "Build GCC (MinGW)",
+      "description": "Build the MinGW GCC 'gcc' configuration",
+      "configurePreset": "gcc"
+    },
+    {
+      "name": "build-gcc-release",
+      "displayName": "Build GCC Release (MinGW)",
+      "description": "Build the MinGW GCC 'gcc-release' configuration",
+      "configurePreset": "gcc-release"
     },
     {
       "name": "build-msvc",

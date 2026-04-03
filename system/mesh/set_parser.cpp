@@ -8,7 +8,7 @@
  */
 #include "set_parser.h"
 #include "parser_base/string_utils.h"
-#include "spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 #include <sstream>
 #include <string>
 #include <vector>

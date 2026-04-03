@@ -7,7 +7,7 @@
  * Author: Xiaotong Wang (or NovaFEA Team)
  */
 #pragma once
-#include "entt/entt.hpp"
+#include <entt/entt.hpp>
 #include "components/mesh_components.h"
 #include <fstream>
 #include <unordered_map>

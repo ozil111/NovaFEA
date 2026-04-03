@@ -5,7 +5,7 @@
  * Copyright (c) 2025 NovaFEA. All rights reserved.
  * Author: Xiaotong Wang (or NovaFEA Team)
  */
-#include "spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 #include "spdlog/sinks/basic_file_sink.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
 #include "parser_base/parserBase.h"       // Legacy .xfem parser (backward compatible)

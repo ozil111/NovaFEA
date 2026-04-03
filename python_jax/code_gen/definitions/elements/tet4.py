@@ -22,6 +22,7 @@ class Tet4(Element):
             outputs=dN_dnat_flat,
             name=f"{self.name}_op_dN_dnat",
             input_names=["xi", "eta", "zeta"],
+            output_names=[f"dN{i+1}_d{j+1}" for i in range(4) for j in range(3)],
             is_operator=True
         )
 
@@ -45,6 +46,7 @@ class Tet4(Element):
             outputs=dN_dx_flat + [detJ],
             name=f"{self.name}_op_mapping",
             input_names=[f"coord[{i}]" for i in range(12)] + [f"dN_dnat[{i}]" for i in range(12)],
+            output_names=[f"dN{i+1}_dx" for i in range(4)] + [f"dN{i+1}_dy" for i in range(4)] + [f"dN{i+1}_dz" for i in range(4)] + ["detJ"],
             is_operator=True
         )
 
@@ -80,6 +82,7 @@ class Tet4(Element):
             outputs=Ke_flat,
             name=f"{self.name}_op_assembly",
             input_names=[f"dN_dx[{i}]" for i in range(12)] + [f"D[{i}]" for i in range(36)] + ["detJ", "weight"],
+            output_names=[f"Ke_{i}_{j}" for i in range(12) for j in range(12)],
             is_operator=True
         )
 
@@ -118,7 +121,14 @@ class Tet4(Element):
         K = B.T * D * B * vol
         K_flat = [K[i, j] for i in range(12) for j in range(12)]
 
-        return MathModel(inputs=in_syms, outputs=K_flat, name=f"{self.name}_Ke")
+        output_names = [f"Ke_{i}_{j}" for i in range(12) for j in range(12)]
+        
+        return MathModel(
+            inputs=in_syms, 
+            outputs=K_flat, 
+            name=f"{self.name}_Ke",
+            output_names=output_names
+        )
 
     def get_mass_operators(self):
         """
@@ -144,6 +154,7 @@ class Tet4(Element):
             outputs=m_lumped,
             name=f"{self.name}_op_lumped_mass",
             input_names=[f"coord[{i}]" for i in range(12)] + ["rho"],
+            output_names=[f"mass_node{i+1}" for i in range(4)],
             is_operator=True
         )
         return [op_mass]

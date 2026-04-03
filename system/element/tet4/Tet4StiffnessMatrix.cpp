@@ -9,7 +9,7 @@
 
 #include "Tet4StiffnessMatrix.h"
 #include "components/mesh_components.h"
-#include "spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 #include <cmath>
 
 void compute_tet4_stiffness_matrix(

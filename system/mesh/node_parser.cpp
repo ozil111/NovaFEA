@@ -7,7 +7,7 @@
  * Author: Xiaotong Wang (or NovaFEA Team)
  */
 #include "mesh/node_parser.h"
-#include "spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 #include "parser_base/string_utils.h"
 #include <iostream>
 #include <sstream>

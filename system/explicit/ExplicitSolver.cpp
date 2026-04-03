@@ -9,7 +9,7 @@
 #include "ExplicitSolver.h"
 #include "../../data_center/components/mesh_components.h"
 #include "../../data_center/components/load_components.h"
-#include "spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 #include <algorithm>
 #include <cctype>
 #include <cmath>

@@ -8,7 +8,7 @@
  */
 #include "mesh/element_exporter.h"
 #include "components/mesh_components.h"
-#include "spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 
 namespace ElementExporter {
 
@@ -24,7 +24,7 @@ void save(std::ofstream& file, const entt::registry& registry) {
         const auto& elem_type = view.get<const Component::ElementType>(entity);
         const auto& id = view.get<const Component::OriginalID>(entity);
         
-        // 新格�? element_id, element_type, [node_ids]
+        // 新格�? element_id, element_type, [node_ids]
         file << id.value << ", " << elem_type.type_id << ", [";
         
         // Write connectivity (node IDs) inside brackets

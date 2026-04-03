@@ -8,7 +8,7 @@
 #include "../../data_center/components/analysis_component.h"
 #include "../../data_center/TopologyData.h"
 #include "../../data_center/DofMap.h"
-#include "spdlog/spdlog.h"
+#include <spdlog/spdlog.h>
 #include <fstream>
 #include <sstream>
 #include <vector>

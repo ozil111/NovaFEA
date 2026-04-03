@@ -23,10 +23,14 @@ def get_model():
     all_inputs = A_syms + B_syms
     input_names = [str(sym) for sym in all_inputs]
     
+    # 5. Create output names (row-major order)
+    output_names = [f"C_{i}_{j}" for i in range(3) for j in range(3)]
+    
     return MathModel(
         inputs=all_inputs, 
         outputs=C_flat, 
         name="custom_matmul", 
         input_names=input_names,
+        output_names=output_names,
         is_operator=True
     )
