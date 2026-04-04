@@ -46,7 +46,9 @@
         "CMAKE_C_COMPILER_TARGET": "x86_64-w64-windows-gnu",
         "CMAKE_CXX_COMPILER_TARGET": "x86_64-w64-windows-gnu",
         "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/vcpkg-triplets",
-        "VCPKG_TARGET_TRIPLET": "x64-mingw-clang-dynamic"
+        "VCPKG_TARGET_TRIPLET": "x64-mingw-clang-dynamic",
+        "CMAKE_CXX_FLAGS_RELEASE": "-O3 -flto=thin -DNDEBUG -ffunction-sections -fdata-sections",
+        "CMAKE_EXE_LINKER_FLAGS_RELEASE": "-flto=thin -Wl,--gc-sections"
       },
       "architecture": {
         "value": "x64",
