@@ -32,6 +32,7 @@ void save_view_state(TuiAppState& state, std::string label) {
     st.node_idx = state.node_selected_row;
     st.elem_idx = state.elem_selected_row;
     st.part_idx = state.part_selected_row;
+    st.set_idx = state.set_selected_row;
     st.left_focus = state.left_focus;
     st.focus_region = state.focus_region;
     if (state.left_view_mode == LeftViewMode::StaticElement) {
@@ -51,6 +52,8 @@ void clear_left_view(TuiAppState& state) {
     state.elem_selected_row = -1;
     state.part_rows.clear();
     state.part_selected_row = -1;
+    state.set_rows.clear();
+    state.set_selected_row = -1;
     state.left_focus = 0.0f;
     state.current_panel_type.clear();
     state.current_panel_id.clear();
@@ -86,6 +89,16 @@ void sync_parts_focus(TuiAppState& state) {
     state.left_focus = clamp01(
         static_cast<float>(state.part_selected_row + 1) /
         static_cast<float>(state.part_rows.size() + 1));
+}
+
+void sync_sets_focus(TuiAppState& state) {
+    if (state.set_rows.empty() || state.set_selected_row < 0) {
+        state.left_focus = 0.0f;
+        return;
+    }
+    state.left_focus = clamp01(
+        static_cast<float>(state.set_selected_row + 1) /
+        static_cast<float>(state.set_rows.size() + 1));
 }
 
 // ── List view builders ────────────────────────────────────────────────
@@ -182,6 +195,40 @@ void build_parts_list_view(AppSession& session, TuiAppState& state) {
     state.focus_region = FocusRegion::TopLeftView;
 }
 
+void build_sets_list_view(AppSession& session, TuiAppState& state) {
+    auto& reg = session.data.registry;
+    state.set_rows.clear();
+
+    // Collect NodeSets
+    {
+        auto view = reg.view<const ::Component::SetName, const ::Component::NodeSetMembers>();
+        for (auto e : view) {
+            const auto& name = view.get<const ::Component::SetName>(e).value;
+            const auto& members = view.get<const ::Component::NodeSetMembers>(e).members;
+            state.set_rows.push_back(SetListRow{ name, "node", members.size() });
+        }
+    }
+    // Collect ElementSets
+    {
+        auto view = reg.view<const ::Component::SetName, const ::Component::ElementSetMembers>();
+        for (auto e : view) {
+            const auto& name = view.get<const ::Component::SetName>(e).value;
+            const auto& members = view.get<const ::Component::ElementSetMembers>(e).members;
+            state.set_rows.push_back(SetListRow{ name, "elem", members.size() });
+        }
+    }
+    std::sort(state.set_rows.begin(), state.set_rows.end(),
+        [](const SetListRow& a, const SetListRow& b) {
+            if (a.type != b.type) return a.type < b.type;
+            return a.name < b.name;
+        });
+    state.left_view_mode = LeftViewMode::SetList;
+    state.top_panel.reset();
+    state.current_panel_type.clear();
+    state.current_panel_id.clear();
+    state.focus_region = FocusRegion::TopLeftView;
+}
+
 // ── Restore view state ────────────────────────────────────────────────
 
 bool restore_view_state(AppSession& session, TuiAppState& state) {
@@ -217,6 +264,15 @@ bool restore_view_state(AppSession& session, TuiAppState& state) {
             state.part_selected_row = -1;
         }
         sync_parts_focus(state);
+    } else if (st.mode == LeftViewMode::SetList) {
+        build_sets_list_view(session, state);
+        if (!state.set_rows.empty()) {
+            const int max_idx = static_cast<int>(state.set_rows.size()) - 1;
+            state.set_selected_row = (std::max)(0, (std::min)(max_idx, st.set_idx));
+        } else {
+            state.set_selected_row = -1;
+        }
+        sync_sets_focus(state);
     } else if (st.mode == LeftViewMode::StaticElement && !st.entity_type.empty() && !st.entity_id.empty()) {
         (void)open_panel_in_top_view(session, state, st.entity_type, st.entity_id, false);
     } else {

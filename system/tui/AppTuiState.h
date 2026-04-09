@@ -53,6 +53,12 @@ struct PartListRow {
     std::size_t elem_count;
 };
 
+struct SetListRow {
+    std::string name;
+    std::string type;  // "node" or "elem"
+    std::size_t member_count;
+};
+
 // ── View history ──────────────────────────────────────────────────────
 
 struct ViewState {
@@ -62,6 +68,7 @@ struct ViewState {
     int node_idx = -1;
     int elem_idx = -1;
     int part_idx = -1;
+    int set_idx = -1;
     float left_focus = 0.0f;
     FocusRegion focus_region = FocusRegion::BottomCommand;
     std::string label;
@@ -84,6 +91,8 @@ struct TuiAppState {
     int elem_selected_row = -1;
     std::vector<PartListRow> part_rows;
     int part_selected_row = -1;
+    std::vector<SetListRow> set_rows;
+    int set_selected_row = -1;
 
     // Panel state
     std::optional<ftxui::Component> top_panel;
@@ -128,17 +137,20 @@ bool open_panel_in_top_view(AppSession& session, TuiAppState& state,
 void build_nodes_list_view(AppSession& session, TuiAppState& state);
 void build_elements_list_view(AppSession& session, TuiAppState& state);
 void build_parts_list_view(AppSession& session, TuiAppState& state);
+void build_sets_list_view(AppSession& session, TuiAppState& state);
 
 bool restore_view_state(AppSession& session, TuiAppState& state);
 
 void sync_nodes_focus(TuiAppState& state);
 void sync_elems_focus(TuiAppState& state);
 void sync_parts_focus(TuiAppState& state);
+void sync_sets_focus(TuiAppState& state);
 
 // ── List rendering (AppTuiListRender.cpp) ─────────────────────────────
 
 ftxui::Element render_nodes_list_element(const TuiAppState& state);
 ftxui::Element render_elements_list_element(const TuiAppState& state);
 ftxui::Element render_parts_list_element(const TuiAppState& state);
+ftxui::Element render_sets_list_element(const TuiAppState& state);
 
 } // namespace tui

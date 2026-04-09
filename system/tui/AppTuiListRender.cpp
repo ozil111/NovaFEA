@@ -166,4 +166,52 @@ Element render_parts_list_element(const TuiAppState& state) {
     }) | border;
 }
 
+Element render_sets_list_element(const TuiAppState& state) {
+    Elements lines;
+    const int total_count = static_cast<int>(state.set_rows.size());
+    const int margin = 30;
+    const int anchor_idx = state.set_selected_row >= 0 ? state.set_selected_row : 0;
+    const int start_idx = (std::max)(0, anchor_idx - margin);
+    const int end_idx = (std::min)(total_count, anchor_idx + margin + 1);
+    Element header_row = hbox({
+        text(" Set Name ") | bold, text(" | "),
+        text(" Type ") | bold, text(" | "),
+        text(" Members ") | bold,
+    }) | color(Color::Cyan);
+
+    for (int i = start_idx; i < end_idx; ++i) {
+        const auto& r = state.set_rows[static_cast<std::size_t>(i)];
+        const bool is_node = (r.type == "node");
+        Element row = hbox({
+            text(" " + r.name + " ") | color(Color::Cyan),
+            text(" | "),
+            text(" " + r.type + " ") | (is_node ? color(Color::GreenLight) : color(Color::YellowLight)),
+            text(" | "),
+            text(" " + std::to_string(r.member_count) + " "),
+        });
+        if (i == state.set_selected_row)
+            row = row | inverted | focus;
+        lines.push_back(std::move(row));
+    }
+
+    return vbox({
+        hbox({
+            text(" NovaFEA ") | bgcolor(Color::Blue) | color(Color::White) | bold,
+            text(" Sets ") | color(Color::Cyan),
+            filler(),
+            text(
+                "Viewing: " + std::to_string(total_count == 0 ? 0 : start_idx + 1) +
+                "-" + std::to_string(end_idx) +
+                " / " + std::to_string(total_count)
+            ) | dim
+        }),
+        separator(),
+        header_row,
+        separatorLight(),
+        vbox(std::move(lines)) | flex,
+        separator(),
+        text("Scroll: wheel / ArrowUp ArrowDown / PgUp PgDn   Enter: panel") | dim,
+    }) | border;
+}
+
 } // namespace tui

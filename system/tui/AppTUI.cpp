@@ -34,10 +34,12 @@ void run_app_tui(AppSession& session) {
             top_left = render_elements_list_element(state);
         } else if (state.left_view_mode == LeftViewMode::PartsList) {
             top_left = render_parts_list_element(state);
+        } else if (state.left_view_mode == LeftViewMode::SetList) {
+            top_left = render_sets_list_element(state);
         } else if (state.top_panel.has_value()) {
             top_left = state.top_panel.value()->Render();
         } else {
-            top_left = text("No active TUI view. Try: list_nodes, list_elements, list_parts, panel ...") | dim;
+            top_left = text("No active TUI view. Try: list_nodes, list_elements, list_parts, list_sets, panel ...") | dim;
         }
 
         const bool left_focused = state.focus_region == FocusRegion::TopLeftView;
@@ -145,6 +147,11 @@ void run_app_tui(AppSession& session) {
                     save_view_state(state, "list_parts");
                     (void)open_panel_in_top_view(session, state, "part",
                         state.part_rows[static_cast<std::size_t>(state.part_selected_row)].name, false);
+                } else if (state.left_view_mode == LeftViewMode::SetList && !state.set_rows.empty() &&
+                    state.set_selected_row >= 0 && state.set_selected_row < static_cast<int>(state.set_rows.size())) {
+                    save_view_state(state, "list_sets");
+                    (void)open_panel_in_top_view(session, state, "set",
+                        state.set_rows[static_cast<std::size_t>(state.set_selected_row)].name, false);
                 }
                 return true;
             }
@@ -177,6 +184,7 @@ void run_app_tui(AppSession& session) {
                     "  list_nodes",
                     "  list_elements",
                     "  list_parts",
+                    "  list_sets",
                     "  panel node <nid>",
                     "  panel elem <eid>",
                     "  panel part <name>",
@@ -221,6 +229,15 @@ void run_app_tui(AppSession& session) {
                 build_parts_list_view(session, state);
                 state.part_selected_row = state.part_rows.empty() ? -1 : 0;
                 sync_parts_focus(state);
+                state.focus_region = FocusRegion::TopLeftView;
+                return true;
+            }
+
+            if (cmd == "list_sets") {
+                save_view_state(state, "list_sets");
+                build_sets_list_view(session, state);
+                state.set_selected_row = state.set_rows.empty() ? -1 : 0;
+                sync_sets_focus(state);
                 state.focus_region = FocusRegion::TopLeftView;
                 return true;
             }
@@ -333,6 +350,32 @@ void run_app_tui(AppSession& session) {
             }
         }
 
+        if (state.focus_region == FocusRegion::TopLeftView &&
+            state.left_view_mode == LeftViewMode::SetList &&
+            !state.set_rows.empty()) {
+            const int max_idx = static_cast<int>(state.set_rows.size()) - 1;
+            if (event == Event::ArrowUp) {
+                state.set_selected_row = (std::max)(0, state.set_selected_row - 1);
+                sync_sets_focus(state);
+                return true;
+            }
+            if (event == Event::ArrowDown) {
+                state.set_selected_row = (std::min)(max_idx, state.set_selected_row + 1);
+                sync_sets_focus(state);
+                return true;
+            }
+            if (event == Event::PageUp) {
+                state.set_selected_row = (std::max)(0, state.set_selected_row - 10);
+                sync_sets_focus(state);
+                return true;
+            }
+            if (event == Event::PageDown) {
+                state.set_selected_row = (std::min)(max_idx, state.set_selected_row + 10);
+                sync_sets_focus(state);
+                return true;
+            }
+        }
+
         // ── Generic arrow/page scrolling for view panes ────────────────
         if (state.focus_region == FocusRegion::TopLeftView && event == Event::ArrowUp) {
             state.left_focus = clamp01(state.left_focus - 0.03f);
@@ -412,6 +455,21 @@ void run_app_tui(AppSession& session) {
                 if (m.button == Mouse::WheelDown) {
                     state.part_selected_row = (std::min)(max_idx, state.part_selected_row + 3);
                     sync_parts_focus(state);
+                    return true;
+                }
+            }
+            if (state.focus_region == FocusRegion::TopLeftView &&
+                state.left_view_mode == LeftViewMode::SetList &&
+                !state.set_rows.empty()) {
+                const int max_idx = static_cast<int>(state.set_rows.size()) - 1;
+                if (m.button == Mouse::WheelUp) {
+                    state.set_selected_row = (std::max)(0, state.set_selected_row - 3);
+                    sync_sets_focus(state);
+                    return true;
+                }
+                if (m.button == Mouse::WheelDown) {
+                    state.set_selected_row = (std::min)(max_idx, state.set_selected_row + 3);
+                    sync_sets_focus(state);
                     return true;
                 }
             }
