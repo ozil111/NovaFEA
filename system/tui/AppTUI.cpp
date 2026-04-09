@@ -133,7 +133,7 @@ void run_app_tui(AppSession& session) {
     float left_focus = 0.0f;
     float right_focus = 0.0f;
     FocusRegion focus_region = FocusRegion::BottomCommand;
-    enum class LeftViewMode { None, StaticElement, NodesList, ElementsList, PartsList };
+    enum class LeftViewMode { None, StaticElement, NodesList, ElementsList, PartsList, SetList };
     LeftViewMode left_view_mode = LeftViewMode::None;
     struct NodeListRow {
         int nid;
@@ -240,6 +240,166 @@ void run_app_tui(AppSession& session) {
             default: break;
         }
         const std::string kind_str = kind_str_c;
+
+        // Set: build a scrollable list panel inside top_panel (StaticElement mode)
+        if (kind == PanelEntityKind::Set) {
+            struct SetMemberRow {
+                int id;
+                std::string type;  // "node" or "elem"
+                std::string extra;
+            };
+            std::vector<SetMemberRow> rows;
+            std::string member_type;
+            auto& reg = session.data.registry;
+
+            // NodeSetMembers
+            if (reg.all_of<::Component::NodeSetMembers>(e)) {
+                const auto& members = reg.get<::Component::NodeSetMembers>(e).members;
+                member_type = "node";
+                for (auto me : members) {
+                    if (!reg.valid(me) || !reg.all_of<::Component::NodeID>(me)) continue;
+                    const int nid = reg.get<::Component::NodeID>(me).value;
+                    std::string extra;
+                    if (reg.all_of<::Component::Position>(me)) {
+                        const auto& p = reg.get<::Component::Position>(me);
+                        std::ostringstream sx, sy, sz;
+                        sx.setf(std::ios::fixed); sy.setf(std::ios::fixed); sz.setf(std::ios::fixed);
+                        sx << std::setprecision(6) << p.x;
+                        sy << std::setprecision(6) << p.y;
+                        sz << std::setprecision(6) << p.z;
+                        extra = sx.str() + ", " + sy.str() + ", " + sz.str();
+                    }
+                    rows.push_back(SetMemberRow{ nid, "node", std::move(extra) });
+                }
+            }
+            // ElementSetMembers
+            if (reg.all_of<::Component::ElementSetMembers>(e)) {
+                const auto& members = reg.get<::Component::ElementSetMembers>(e).members;
+                member_type = "elem";
+                for (auto me : members) {
+                    if (!reg.valid(me) || !reg.all_of<::Component::ElementID>(me)) continue;
+                    const int eid = reg.get<::Component::ElementID>(me).value;
+                    std::string extra;
+                    if (reg.all_of<::Component::ElementType>(me)) {
+                        extra = "type=" + std::to_string(reg.get<::Component::ElementType>(me).type_id);
+                    }
+                    rows.push_back(SetMemberRow{ eid, "elem", std::move(extra) });
+                }
+            }
+            std::sort(rows.begin(), rows.end(),
+                [](const SetMemberRow& a, const SetMemberRow& b) { return a.id < b.id; });
+
+            const bool is_node_set = (member_type == "node");
+            const std::string set_title = is_node_set ? "NodeSet: " + id_or_name : "ElementSet: " + id_or_name;
+
+            auto shared_rows = std::make_shared<std::vector<SetMemberRow>>(std::move(rows));
+            auto shared_selected = std::make_shared<int>(shared_rows->empty() ? -1 : 0);
+
+            ftxui::Component dummy = Container::Vertical({});
+            top_panel = Renderer(dummy, [&, shared_rows, shared_selected, is_node_set, set_title]() {
+                const int selected = *shared_selected;
+                const int total_count = static_cast<int>(shared_rows->size());
+                const int margin = 30;
+                const int anchor_idx = selected >= 0 ? selected : 0;
+                const int start_idx = (std::max)(0, anchor_idx - margin);
+                const int end_idx = (std::min)(total_count, anchor_idx + margin + 1);
+
+                Elements lines;
+                if (is_node_set) {
+                    lines.push_back(hbox({
+                        text(" NodeID ") | bold, text(" | "),
+                        text(" Position (X, Y, Z) ") | bold,
+                    }) | color(Color::Cyan));
+                } else {
+                    lines.push_back(hbox({
+                        text(" ElementID ") | bold, text(" | "),
+                        text(" Type ") | bold,
+                    }) | color(Color::YellowLight));
+                }
+                lines.push_back(separatorLight());
+
+                for (int i = start_idx; i < end_idx; ++i) {
+                    const auto& r = (*shared_rows)[static_cast<std::size_t>(i)];
+                    Element row;
+                    if (is_node_set) {
+                        row = hbox({
+                            text(" " + std::to_string(r.id) + " ") | color(Color::Cyan),
+                            text(" | "),
+                            text(" " + r.extra + " "),
+                        });
+                    } else {
+                        row = hbox({
+                            text(" " + std::to_string(r.id) + " ") | color(Color::Cyan),
+                            text(" | "),
+                            text(" " + r.extra + " ") | color(Color::YellowLight),
+                        });
+                    }
+                    if (i == selected)
+                        row = row | inverted | focus;
+                    lines.push_back(std::move(row));
+                }
+
+                return vbox({
+                    hbox({
+                        text(" NovaFEA ") | bgcolor(Color::Blue) | color(Color::White) | bold,
+                        text(" Set ") | color(Color::Cyan),
+                        filler(),
+                        text(set_title) | dim,
+                    }) | border,
+                    hbox({
+                        text(" " + set_title + " "),
+                        filler(),
+                        text(
+                            "Viewing: " + std::to_string(total_count == 0 ? 0 : start_idx + 1) +
+                            "-" + std::to_string(end_idx) +
+                            " / " + std::to_string(total_count)
+                        ) | dim
+                    }),
+                    separator(),
+                    vbox(std::move(lines)) | flex,
+                    separator(),
+                    text("Scroll: ArrowUp ArrowDown / PgUp PgDn   Enter: jump to item   Esc: back") | dim,
+                });
+            });
+
+            const std::string set_id_capture = id_or_name;
+            top_panel = CatchEvent(*top_panel, [&, shared_rows, shared_selected, set_id_capture](Event ev) -> bool {
+                const int total = static_cast<int>(shared_rows->size());
+                if (total == 0) return false;
+                const int max_idx = total - 1;
+                int& sel = *shared_selected;
+                if (ev == Event::ArrowUp) {
+                    sel = (std::max)(0, sel - 1);
+                    return true;
+                }
+                if (ev == Event::ArrowDown) {
+                    sel = (std::min)(max_idx, sel + 1);
+                    return true;
+                }
+                if (ev == Event::PageUp) {
+                    sel = (std::max)(0, sel - 10);
+                    return true;
+                }
+                if (ev == Event::PageDown) {
+                    sel = (std::min)(max_idx, sel + 10);
+                    return true;
+                }
+                if (ev == Event::Return && sel >= 0 && sel < total) {
+                    const auto& r = (*shared_rows)[static_cast<std::size_t>(sel)];
+                    save_view_state("panel set " + set_id_capture);
+                    (void)open_panel_in_top_view(r.type, std::to_string(r.id), false);
+                    return true;
+                }
+                return false;
+            });
+
+            left_view_mode = LeftViewMode::StaticElement;
+            left_focus = 0.0f;
+            focus_region = FocusRegion::TopLeftView;
+            current_panel_type = type;
+            current_panel_id = id_or_name;
+            return true;
+        }
 
         std::vector<ftxui::Component> link_buttons;
 
