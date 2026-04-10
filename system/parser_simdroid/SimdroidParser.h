@@ -3,7 +3,12 @@
 #include <entt/entt.hpp>
 #include "nlohmann/json.hpp"
 #include <string>
+#include <unordered_map>
 #include <vector>
+#include <filesystem>
+
+// Forward declarations for pointer/reference parameters in private methods
+class DofMap;
 
 class SimdroidParser {
     public:
@@ -48,4 +53,23 @@ class SimdroidParser {
 
         // Post-parse: validate contact entity references
         static void validate_contacts(entt::registry& registry);
+
+        // --- Sub-parsers extracted from parse_control_json() ---
+        static void parse_cross_sections(const nlohmann::json& j, entt::registry& registry,
+                                         std::unordered_map<std::string, entt::entity>& cross_section_map,
+                                         DofMap* dof_map);
+        static void parse_materials(const nlohmann::json& j, entt::registry& registry,
+                                    DofMap* dof_map, const std::filesystem::path& control_dir);
+        static void parse_part_properties(const nlohmann::json& j, entt::registry& registry,
+                                         const std::unordered_map<std::string, entt::entity>& cross_section_map);
+        static void parse_contacts(const nlohmann::json& j, entt::registry& registry,
+                                   DofMap* dof_map);
+
+        // Curve entity helpers (extracted from lambdas in parse_control_json)
+        static entt::entity get_or_create_curve_entity(
+            const std::string& fname, entt::registry& registry,
+            DofMap* dof_map, const std::filesystem::path& control_dir);
+        static entt::entity resolve_curve_entity(
+            const std::string& raw_name, entt::registry& registry, DofMap* dof_map);
+
     };
