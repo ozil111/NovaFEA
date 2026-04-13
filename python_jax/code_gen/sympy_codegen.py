@@ -4,6 +4,7 @@ from sympy.printing.c import C99CodePrinter
 from sympy.printing.fortran import FCodePrinter
 from sympy.printing.numpy import JaxPrinter
 import argparse
+import re
 import sys
 import importlib.util
 import importlib
@@ -13,6 +14,10 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.resolve()))
 
 from definitions.abc import Element, Material
+from ci_test.wrappers import generate_cpp_main, generate_f90_main
+from ci_test.test_driver_template import generate_test_driver
+from ci_test.build_script_generator import generate_build_sh, generate_build_bat
+from ci_test.ci_workflow_generator import generate_github_actions_workflow
 
 
 # ---------------------------------------------------------------------------
@@ -346,7 +351,8 @@ class FEACompiler:
             raise ValueError(f"Unknown target: {target}")
 
     @staticmethod
-    def compile_all(model: MathModel, chunk_size=None, cse_strategy="auto"):
+    def compile_all(model: MathModel, chunk_size=None, cse_strategy="auto", test=False,
+                    task=None, model_name=None):
         """
         一次性生成 jax/cpp/cuda/fortran 四种目标源码。
         
@@ -358,9 +364,14 @@ class FEACompiler:
             model: 数学模型
             chunk_size: 用户指定的 chunk size (可选)
             cse_strategy: CSE 策略 ('auto' 或 'fixed')
+            test: 是否同时生成测试资产（wrapper、test_driver、build script）
+            task: CLI 任务类型 ('constitutive', 'stiffness', 'mass', 'custom')，用于 test_driver 重新加载模型
+            model_name: 模型/材料/单元名称，用于 test_driver 重新加载模型
         
         Returns:
-            dict: {'jax': code, 'cpp': code, 'cuda': code, 'fortran': code}
+            dict: {'jax': code, 'cpp': code, 'cuda': code, 'fortran': code,
+                   'cpp_wrapper': str, 'f90_wrapper': str, 'test_driver': str,
+                   'build_sh': str, 'build_bat': str} (后5项仅在 test=True 时存在)
         """
         # 决定各 target 的 chunk size
         cpp_chunk = FEACompiler.resolve_chunk_size(model, "cpp", chunk_size, cse_strategy)
@@ -375,12 +386,21 @@ class FEACompiler:
         else:
             jax_lowered = FEACompiler.lower_model(model, jax_chunk)
         
-        return {
+        result = {
             "jax": FEACompiler._to_jax(model, lowered=jax_lowered, chunk_size=jax_chunk, cse_strategy=cse_strategy),
             "cpp": FEACompiler._to_source(model, is_cuda=False, lowered=shared_lowered, chunk_size=cpp_chunk, cse_strategy=cse_strategy),
             "cuda": FEACompiler._to_source(model, is_cuda=True, lowered=shared_lowered, chunk_size=cpp_chunk, cse_strategy=cse_strategy),
             "fortran": FEACompiler._to_fortran(model, lowered=shared_lowered, chunk_size=cpp_chunk, cse_strategy=cse_strategy),
         }
+
+        if test:
+            result["cpp_wrapper"] = generate_cpp_main(model)
+            result["f90_wrapper"] = generate_f90_main(model)
+            result["test_driver"] = generate_test_driver(model, task=task, model_name=model_name)
+            result["build_sh"] = generate_build_sh(model)
+            result["build_bat"] = generate_build_bat(model)
+
+        return result
 
     @staticmethod
     def _to_jax(model, lowered=None, chunk_size=None, cse_strategy="auto"):
@@ -552,6 +572,44 @@ class FEACompiler:
         
         printer = CachedPrinter(FEAFortranPrinter())
 
+        def _fortran_declare(type_decl, vars_list, indent="    "):
+            """Generate Fortran declaration with line continuation if exceeding 120 chars.
+            Fortran free-format limit is 132 chars; we use 120 for safety margin.
+            Continuation uses '&' at end of line and '&' at start of continuation.
+            The comma separator must appear at the end of the line (before &)
+            so that the continuation line can start cleanly with the next variable.
+            """
+            if not vars_list:
+                return []
+            max_len = 120
+            prefix = f"{indent}{type_decl} :: "
+            # Try single line first
+            single_line = prefix + ", ".join(vars_list)
+            if len(single_line) <= max_len:
+                return [single_line]
+            # Split across multiple lines with continuation
+            # Strategy: each line ends with ", &" (comma before ampersand)
+            # and continuation lines start with "& " then the next variable
+            result_lines = []
+            current = prefix
+            first = True
+            for v in vars_list:
+                # Check if adding this variable (with separator) would exceed limit
+                if first:
+                    candidate = current + v
+                else:
+                    candidate = current + ", " + v
+                if len(candidate) + 2 > max_len and not first:
+                    # End current line with comma + ampersand for continuation
+                    result_lines.append(current + ", &")
+                    current = f"{indent}& {v}"
+                    first = False
+                else:
+                    current = candidate
+                    first = False
+            result_lines.append(current)
+            return result_lines
+
         lines = [
             "! Generated by sympy_codegen.py. Do not edit.",
             "!",
@@ -587,9 +645,9 @@ class FEACompiler:
             if s.isidentifier():
                 input_vars.append(s)
 
-        # First, declare all input variables
+        # First, declare all input variables (with line continuation if needed)
         if input_vars:
-            lines.append(f"    double precision :: {', '.join(input_vars)}")
+            lines.extend(_fortran_declare("double precision", input_vars, "    "))
 
         # Then assign values
         for i, sym in enumerate(model.inputs):
@@ -615,9 +673,9 @@ class FEACompiler:
                         dp_vars.append(str(var))
 
                 if dp_vars:
-                    lines.append(f"        double precision :: {', '.join(dp_vars)}")
+                    lines.extend(_fortran_declare("double precision", dp_vars, "        "))
                 if log_vars:
-                    lines.append(f"        logical :: {', '.join(log_vars)}")
+                    lines.extend(_fortran_declare("logical", log_vars, "        "))
 
                 # Then assign values
                 for var, expr in chunk.sub_exprs:
@@ -631,7 +689,14 @@ class FEACompiler:
                 lines.append("    end block")
 
         lines.append(f"end subroutine compute_{model.name}")
-        return "\n".join(lines)
+        src = "\n".join(lines)
+        # Replace C-style array access in[i] with Fortran 1-based in_vec(i+1)
+        # This handles SymPy symbols like in[0], in[1] that are not valid identifiers
+        def _replace_in_array(m):
+            idx = int(m.group(1))
+            return f"in_vec({idx + 1})"
+        src = re.sub(r'in\[(\d+)\]', _replace_in_array, src)
+        return src
 
     @staticmethod
     def compile_element(element: Element, target: str, chunk_size=None, cse_strategy="auto"):
@@ -734,6 +799,17 @@ def main():
         default="auto",
         help="CSE chunk sizing 策略。'auto' 根据输出规模自动调整，'fixed' 使用固定默认值。",
     )
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        default=False,
+        help="同时生成 CI 测试资产（C++/Fortran wrapper、test_driver.py、build 脚本）",
+    )
+    parser.add_argument(
+        "--test-output-dir",
+        default=None,
+        help="测试资产输出目录（仅在 --test 启用时有效，默认与 --output 相同）",
+    )
     args = parser.parse_args()
 
     if args.task == "constitutive":
@@ -790,6 +866,8 @@ def main():
             parser.error(f"get_model() must return a MathModel or a list of MathModels. Got: {type(models)}")
 
     # ---------------- Compile Models ----------------
+    base_test_dir = Path(args.test_output_dir or args.output or ".") if args.test else None
+
     for name, model in models_to_compile.items():
         if args.target == "all":
             # --target all: 使用 compile_all 实现真正的共享 CSE
@@ -797,12 +875,41 @@ def main():
                 model,
                 chunk_size=args.chunk_size,
                 cse_strategy=args.cse_strategy,
+                test=args.test,
+                task=args.task,
+                model_name=args.material or args.element or name,
             )
             for t, code in generated.items():
-                out_path = Path(args.output or ".") / _default_output(name, t)
-                with open(out_path, "w", encoding="utf-8") as f:
-                    f.write(code)
-                print(f"Generated: {out_path}")
+                if t in ("jax", "cpp", "cuda", "fortran"):
+                    out_path = Path(args.output or ".") / _default_output(name, t)
+                    out_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(out_path, "w", encoding="utf-8") as f:
+                        f.write(code)
+                    print(f"Generated: {out_path}")
+                    # Also copy kernel source to test directory if --test is enabled
+                    if args.test and base_test_dir is not None:
+                        kernel_dir = base_test_dir / name
+                        kernel_dir.mkdir(parents=True, exist_ok=True)
+                        kernel_ext_map = {"cpp": "kernel.cpp", "cuda": "kernel.cu", "fortran": "kernel.f90"}
+                        if t in kernel_ext_map:
+                            kernel_path = kernel_dir / kernel_ext_map[t]
+                            with open(kernel_path, "w", encoding="utf-8") as f:
+                                f.write(code)
+                elif args.test and t in ("cpp_wrapper", "f90_wrapper", "test_driver", "build_sh", "build_bat"):
+                    # Each model gets its own subdirectory to avoid overwriting
+                    test_dir = base_test_dir / name
+                    test_dir.mkdir(parents=True, exist_ok=True)
+                    fname_map = {
+                        "cpp_wrapper": "main.cpp",
+                        "f90_wrapper": "main.f90",
+                        "test_driver": "test_driver.py",
+                        "build_sh": "build.sh",
+                        "build_bat": "build.bat",
+                    }
+                    out_path = test_dir / fname_map[t]
+                    with open(out_path, "w", encoding="utf-8") as f:
+                        f.write(code)
+                    print(f"Generated: {out_path}")
         else:
             # 单一目标编译
             code = FEACompiler.compile(
