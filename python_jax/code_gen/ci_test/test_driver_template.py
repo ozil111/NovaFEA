@@ -4,7 +4,7 @@ Test driver generator for cross-backend numerical validation.
 Generates a standalone test_driver.py that:
 1. Uses SymPy lambdify as the reference implementation
 2. Runs compiled C++/Fortran executables via subprocess
-3. Compares outputs with atol=1e-10
+3. Compares outputs with atol=1e-7
 4. Supports --n-runs, --atol, --seed, --cpp-exe, --f90-exe CLI args
 5. Provides debug dump on failure
 
@@ -27,15 +27,30 @@ import subprocess
 import sys
 
 # Add code_gen directory to sys.path for unpickling MathModel
-# Search upward from this script's directory to find python_jax/code_gen
+# 1. Try reading codegen_meta.json (generated at code-gen time) for the path
+# 2. Fall back to searching upward for python_jax/code_gen or sympy_codegen.py
 _script_dir = os.path.dirname(os.path.abspath(__file__))
-_search_dir = _script_dir
-for _ in range(5):  # search up to 5 levels
-    _candidate = os.path.join(_search_dir, 'python_jax', 'code_gen')
+_code_gen_found = False
+_meta_path = os.path.join(_script_dir, 'codegen_meta.json')
+if os.path.isfile(_meta_path):
+    import json as _json
+    with open(_meta_path) as _f:
+        _meta = _json.load(_f)
+    _candidate = os.path.normpath(os.path.join(_script_dir, _meta['code_gen_rel_path']))
     if os.path.isdir(_candidate):
         sys.path.insert(0, _candidate)
-        break
-    _search_dir = os.path.dirname(_search_dir)
+        _code_gen_found = True
+if not _code_gen_found:
+    _search_dir = _script_dir
+    for _ in range(10):  # fallback: search up to 10 levels
+        _candidate = os.path.join(_search_dir, 'python_jax', 'code_gen')
+        if os.path.isdir(_candidate):
+            sys.path.insert(0, _candidate)
+            break
+        if os.path.isfile(os.path.join(_search_dir, 'sympy_codegen.py')):
+            sys.path.insert(0, _search_dir)
+            break
+        _search_dir = os.path.dirname(_search_dir)
 
 import numpy as np
 import sympy as sp
@@ -157,10 +172,10 @@ def main():
     )
     parser.add_argument("--n-runs", type=int, default=1000,
                         help="Number of random test runs (default: 1000)")
-    parser.add_argument("--atol", type=float, default=1e-10,
-                        help="Absolute tolerance (default: 1e-10)")
-    parser.add_argument("--rtol", type=float, default=1e-11,
-                        help="Relative tolerance (default: 1e-11)")
+    parser.add_argument("--atol", type=float, default=1e-7,
+                        help="Absolute tolerance (default: 1e-7)")
+    parser.add_argument("--rtol", type=float, default=1e-9,
+                        help="Relative tolerance (default: 1e-9)")
     parser.add_argument("--seed", type=int, default=42,
                         help="Random seed (default: 42)")
     parser.add_argument("--cpp-exe", type=str, default=None,

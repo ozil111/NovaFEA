@@ -4,6 +4,7 @@ from sympy.printing.c import C99CodePrinter
 from sympy.printing.fortran import FCodePrinter
 from sympy.printing.numpy import JaxPrinter
 import argparse
+import os
 import re
 import sys
 import importlib.util
@@ -910,6 +911,18 @@ def main():
                     with open(out_path, "w", encoding="utf-8") as f:
                         f.write(code)
                     print(f"Generated: {out_path}")
+            # Generate codegen_meta.json for test_driver.py to locate sympy_codegen
+            if args.test and base_test_dir is not None:
+                import json as _json
+                test_dir = base_test_dir / name
+                test_dir.mkdir(parents=True, exist_ok=True)
+                code_gen_dir = Path(__file__).parent.resolve()
+                rel_path = os.path.relpath(code_gen_dir, test_dir.resolve())
+                meta = {"code_gen_rel_path": rel_path}
+                meta_path = test_dir / "codegen_meta.json"
+                with open(meta_path, "w", encoding="utf-8") as f:
+                    _json.dump(meta, f, indent=2)
+                print(f"Generated: {meta_path}")
         else:
             # 单一目标编译
             code = FEACompiler.compile(
