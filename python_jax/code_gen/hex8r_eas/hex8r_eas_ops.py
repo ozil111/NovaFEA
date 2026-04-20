@@ -731,6 +731,20 @@ def build_hex8r_op_stress_pk2_n3():
     )
 
 
+def _deviatoric_energy_n3(I1_bar, C10, C20, C30):
+    """3rd-order Ogden deviatoric strain energy W_dev(I1_bar)."""
+    i1_shift = I1_bar - 3
+    return C10 * i1_shift + C20 * i1_shift**2 + C30 * i1_shift**3
+
+
+def _volumetric_energy_n3(J, D1, D2, D3):
+    """3rd-order volumetric strain energy W_vol(J)."""
+    j_minus_1 = J - 1
+    d2_term = sp.Piecewise((j_minus_1**4 / D2, D2 > VOL_TOL), (0, True))
+    d3_term = sp.Piecewise((j_minus_1**6 / D3, D3 > VOL_TOL), (0, True))
+    return j_minus_1**2 / D1 + d2_term + d3_term
+
+
 def build_hex8r_op_dmat_n3():
     F = mat_symbols("F", 3, 3)
     B_bar = mat_symbols("B_bar", 3, 3)
@@ -738,9 +752,16 @@ def build_hex8r_op_dmat_n3():
     I1_bar = sp.Symbol("I1_bar", real=True)
     C10, C20, C30, D1, D2, D3 = sp.symbols("C10 C20 C30 D1 D2 D3", real=True)
 
-    W1, W11 = n3_deviatoric_energy_derivatives(I1_bar, C10, C20, C30)
-    p = volumetric_pressure(J, D1, D2, D3)
-    p_tilde = volumetric_pressure_tilde(J, D1, D2, D3)
+    # Automatic differentiation from potential energy functions
+    W_dev = _deviatoric_energy_n3(I1_bar, C10, C20, C30)
+    W1 = sp.diff(W_dev, I1_bar)
+    W11 = sp.diff(W_dev, I1_bar, 2)
+
+    W_vol = _volumetric_energy_n3(J, D1, D2, D3)
+    p = sp.diff(W_vol, J)
+    # p_tilde = d(J*p)/dJ = p + J*dp/dJ
+    p_tilde = sp.diff(J * p, J)
+
     two_over_J = 2 / J
     coeff1 = two_over_J * (W1 + I1_bar * W11)
     coeff2 = two_over_J * W11
