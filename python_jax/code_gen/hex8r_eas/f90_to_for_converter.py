@@ -155,8 +155,20 @@ def convert_f90_to_for(input_file, output_file):
             continue
         
         # 声明行：需要检查是否需要拆分
+        # 先合并所有续行，再拆分声明
         if is_declaration_line(line):
-            decl_lines = split_declaration(line)
+            full_line = line.rstrip()
+            while full_line.endswith('&'):
+                full_line = full_line[:-1].rstrip()
+                i += 1
+                if i < len(lines):
+                    next_line = lines[i].strip()
+                    if next_line.startswith('&'):
+                        next_line = next_line[1:].lstrip()
+                    full_line += ' ' + next_line
+                else:
+                    break
+            decl_lines = split_declaration(full_line)
             output_lines.extend(decl_lines)
             i += 1
             continue
