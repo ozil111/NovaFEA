@@ -166,98 +166,112 @@
       call unpack_2d_rowmajor(out_vec, 6, 6, D)
       end subroutine hex8r_op_constitutive_linear_wrapper
 
-      subroutine hex8r_op_stress_cauchy_n3_wrapper(F, C10, C20, C30,
-     1 D1, D2, D3, stress, J, B, B_bar, I1_bar, W1)
+      subroutine hex8r_op_kinematics_wrapper(F, J, B, B_bar, I1_bar_B,
+     1 C, C_bar, Cinv, I1_bar_C, J_minus_2_3)
       implicit none
-      real*8 F(3,3), C10, C20, C30, D1, D2, D3, stress(6), J
-      real*8 B(3,3), B_bar(3,3), I1_bar, W1
-      real*8 in_vec(15), out_vec(27)
+      real*8 F(3,3), J, B(3,3), B_bar(3,3), I1_bar_B
+      real*8 C(3,3), C_bar(3,3), Cinv(3,3), I1_bar_C, J_minus_2_3
+      real*8 in_vec(9), out_vec(49)
 
       call pack_2d_rowmajor(F, 3, 3, in_vec(1:9))
-      in_vec(10) = C10
-      in_vec(11) = C20
-      in_vec(12) = C30
-      in_vec(13) = D1
-      in_vec(14) = D2
-      in_vec(15) = D3
+
+      call compute_hex8r_op_kinematics(in_vec, out_vec)
+
+      J = out_vec(1)
+      call unpack_2d_rowmajor(out_vec(2:10), 3, 3, B)
+      call unpack_2d_rowmajor(out_vec(11:19), 3, 3, B_bar)
+      I1_bar_B = out_vec(20)
+      call unpack_2d_rowmajor(out_vec(21:29), 3, 3, C)
+      call unpack_2d_rowmajor(out_vec(30:38), 3, 3, C_bar)
+      call unpack_2d_rowmajor(out_vec(39:47), 3, 3, Cinv)
+      I1_bar_C = out_vec(48)
+      J_minus_2_3 = out_vec(49)
+      end subroutine hex8r_op_kinematics_wrapper
+
+      subroutine hex8r_op_stress_cauchy_n3_wrapper(J, B_bar, C10, C20,
+     1 C30, D1, D2, D3, stress)
+      implicit none
+      real*8 J, B_bar(3,3), C10, C20, C30, D1, D2, D3, stress(6)
+      real*8 in_vec(16), out_vec(27)
+
+      in_vec(1) = J
+      call pack_2d_rowmajor(B_bar, 3, 3, in_vec(2:10))
+      in_vec(11) = C10
+      in_vec(12) = C20
+      in_vec(13) = C30
+      in_vec(14) = D1
+      in_vec(15) = D2
+      in_vec(16) = D3
 
       call compute_hex8r_op_stress_cauchy_n3(in_vec, out_vec)
 
       stress = out_vec(1:6)
-      J = out_vec(7)
-      call unpack_2d_rowmajor(out_vec(8:16), 3, 3, B)
-      call unpack_2d_rowmajor(out_vec(17:25), 3, 3, B_bar)
-      I1_bar = out_vec(26)
-      W1 = out_vec(27)
       end subroutine hex8r_op_stress_cauchy_n3_wrapper
 
-      subroutine hex8r_op_stress_pk2_n3_wrapper(F, C10, C20, C30,
-     1 D1, D2, D3, stress, J, C, C_bar, Cinv, I1_bar, W1)
+      subroutine hex8r_op_stress_pk2_n3_wrapper(J, J_minus_2_3, Cinv,
+     1 C_bar, I1_bar, C10, C20, C30, D1, D2, D3, stress)
       implicit none
-      real*8 F(3,3), C10, C20, C30, D1, D2, D3, stress(6), J
-      real*8 C(3,3), C_bar(3,3), Cinv(3,3), I1_bar, W1
-      real*8 in_vec(15), out_vec(36)
+      real*8 J, J_minus_2_3, Cinv(3,3), C_bar(3,3), I1_bar
+      real*8 C10, C20, C30, D1, D2, D3, stress(6)
+      real*8 in_vec(27), out_vec(36)
 
-      call pack_2d_rowmajor(F, 3, 3, in_vec(1:9))
-      in_vec(10) = C10
-      in_vec(11) = C20
-      in_vec(12) = C30
-      in_vec(13) = D1
-      in_vec(14) = D2
-      in_vec(15) = D3
+      in_vec(1) = J
+      in_vec(2) = J_minus_2_3
+      call pack_2d_rowmajor(Cinv, 3, 3, in_vec(3:11))
+      call pack_2d_rowmajor(C_bar, 3, 3, in_vec(12:20))
+      in_vec(21) = I1_bar
+      in_vec(22) = C10
+      in_vec(23) = C20
+      in_vec(24) = C30
+      in_vec(25) = D1
+      in_vec(26) = D2
+      in_vec(27) = D3
 
       call compute_hex8r_op_stress_pk2_n3(in_vec, out_vec)
 
       stress = out_vec(1:6)
-      J = out_vec(7)
-      call unpack_2d_rowmajor(out_vec(8:16), 3, 3, C)
-      call unpack_2d_rowmajor(out_vec(17:25), 3, 3, C_bar)
-      call unpack_2d_rowmajor(out_vec(26:34), 3, 3, Cinv)
-      I1_bar = out_vec(35)
-      W1 = out_vec(36)
       end subroutine hex8r_op_stress_pk2_n3_wrapper
 
-      subroutine hex8r_op_dmat_n3_wrapper(F, B_bar, J, I1_bar, C10,
-     1 C20, C30, D1, D2, D3, D)
+      subroutine hex8r_op_dmat_n3_wrapper(B_bar, J, I1_bar, C10, C20,
+     1 C30, D1, D2, D3, D)
       implicit none
-      real*8 F(3,3), B_bar(3,3), J, I1_bar, C10, C20, C30, D1, D2,
-     1 D3, D(6,6)
-      real*8 in_vec(26), out_vec(36)
+      real*8 B_bar(3,3), J, I1_bar, C10, C20, C30, D1, D2, D3
+      real*8 D(6,6)
+      real*8 in_vec(17), out_vec(36)
 
-      call pack_2d_rowmajor(F, 3, 3, in_vec(1:9))
-      call pack_2d_rowmajor(B_bar, 3, 3, in_vec(10:18))
-      in_vec(19) = J
-      in_vec(20) = I1_bar
-      in_vec(21) = C10
-      in_vec(22) = C20
-      in_vec(23) = C30
-      in_vec(24) = D1
-      in_vec(25) = D2
-      in_vec(26) = D3
+      call pack_2d_rowmajor(B_bar, 3, 3, in_vec(1:9))
+      in_vec(10) = J
+      in_vec(11) = I1_bar
+      in_vec(12) = C10
+      in_vec(13) = C20
+      in_vec(14) = C30
+      in_vec(15) = D1
+      in_vec(16) = D2
+      in_vec(17) = D3
 
       call compute_hex8r_op_dmat_n3(in_vec, out_vec)
 
       call unpack_2d_rowmajor(out_vec, 6, 6, D)
       end subroutine hex8r_op_dmat_n3_wrapper
 
-      subroutine hex8r_op_dmat_pk2_n3_wrapper(F, C_bar, Cinv, J,
-     1 I1_bar, C10, C20, C30, D1, D2, D3, D)
+      subroutine hex8r_op_dmat_pk2_n3_wrapper(C_bar, Cinv, J, I1_bar,
+     1 J_minus_2_3, C10, C20, C30, D1, D2, D3, D)
       implicit none
-      real*8 F(3,3), C_bar(3,3), Cinv(3,3), J, I1_bar, C10, C20, C30,
-     1 D1, D2, D3, D(6,6)
-      real*8 in_vec(35), out_vec(36)
+      real*8 C_bar(3,3), Cinv(3,3), J, I1_bar, J_minus_2_3
+      real*8 C10, C20, C30, D1, D2, D3, D(6,6)
+      real*8 in_vec(27), out_vec(36)
 
-      call pack_2d_rowmajor(F, 3, 3, in_vec(1:9))
-      call pack_2d_rowmajor(C_bar, 3, 3, in_vec(10:18))
-      call pack_2d_rowmajor(Cinv, 3, 3, in_vec(19:27))
-      in_vec(28) = J
-      in_vec(29) = I1_bar
-      in_vec(30) = C10
-      in_vec(31) = C20
-      in_vec(32) = C30
-      in_vec(33) = D1
-      in_vec(34) = D2
-      in_vec(35) = D3
+      call pack_2d_rowmajor(C_bar, 3, 3, in_vec(1:9))
+      call pack_2d_rowmajor(Cinv, 3, 3, in_vec(10:18))
+      in_vec(19) = J
+      in_vec(20) = I1_bar
+      in_vec(21) = J_minus_2_3
+      in_vec(22) = C10
+      in_vec(23) = C20
+      in_vec(24) = C30
+      in_vec(25) = D1
+      in_vec(26) = D2
+      in_vec(27) = D3
 
       call compute_hex8r_op_dmat_pk2_n3(in_vec, out_vec)
 

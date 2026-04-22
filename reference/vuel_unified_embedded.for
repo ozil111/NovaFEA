@@ -34,6 +34,7 @@
 #include "hex8r_op_hourglass_gamma_gen.for"
 #include "hex8r_op_internal_force_gen.for"
 #include "hex8r_op_k_matrices_gen.for"
+#include "hex8r_op_kinematics_gen.for"
 #include "hex8r_op_rot_dmtx_gen.for"
 #include "hex8r_op_stress_cauchy_n3_gen.for"
 #include "hex8r_op_stress_pk2_n3_gen.for"
@@ -564,32 +565,35 @@ C                     F_new = J_current * J0^(-1) where J_current is from COORD 
                       call hex8r_op_jacobian_center_wrapper(COORD, JAC_CUR, DETJ, FJACINV)
                       F_new = matmul(JAC_CUR, JAC_REF_INV)
                       
-C                     B5. Calculate PK-II stress from F_new (PK2 formulation)
+C                     B5. Calculate kinematics and stresses from F_new
                       block
                         real*8 :: F_loc(3,3)
-                        real*8 :: C_loc(3,3), Cinv_loc(3,3)
-                        real*8 :: C_bar_loc(3,3)
                         real*8 :: stressPK2_voigt(6)
                         real*8 :: stressCauchy_voigt(6)
                         real*8 :: DMAT_PK2_loc(6,6)
+                        ! Kinematics outputs
                         real*8 :: B_loc(3,3), B_bar_loc(3,3)
-                        real*8 :: I1_loc, I1_loc_pk2
-                        real*8 :: J_calc, J_cauchy
-                        real*8 :: W1_cauchy, W1_pk2
+                        real*8 :: C_loc(3,3), C_bar_loc(3,3), Cinv_loc(3,3)
+                        real*8 :: I1_bar_B, I1_bar_C, J_minus_2_3_calc
                         
                         F_loc = reshape(F_new, (/3,3/))
                         
-C                       Calculate PK-II stress using N3 hyperelastic model
-                        call hex8r_op_stress_pk2_n3_wrapper(F_loc,
-     &                       C10, C20, C30, D1, D2, D3,
-     &                       stressPK2_voigt, J_calc, C_loc,
-     &                       C_bar_loc, Cinv_loc, I1_loc_pk2, W1_pk2)
+C                       B5a. Compute kinematics from F
+                        call hex8r_op_kinematics_wrapper(F_loc,
+     &                       J_calc, B_loc, B_bar_loc, I1_bar_B,
+     &                       C_loc, C_bar_loc, Cinv_loc, I1_bar_C,
+     &                       J_minus_2_3_calc)
                         
-C                       Also calculate Cauchy stress for post-processing
-                        call hex8r_op_stress_cauchy_n3_wrapper(F_loc,
-     &                       C10, C20, C30, D1, D2, D3,
-     &                       stressCauchy_voigt, J_cauchy, B_loc,
-     &                       B_bar_loc, I1_loc, W1_cauchy)
+C                       B5b. Calculate PK-II stress using kinematics outputs
+                        call hex8r_op_stress_pk2_n3_wrapper(J_calc,
+     &                       J_minus_2_3_calc, Cinv_loc, C_bar_loc,
+     &                       I1_bar_C, C10, C20, C30, D1, D2, D3,
+     &                       stressPK2_voigt)
+                        
+C                       B5c. Calculate Cauchy stress for post-processing
+                        call hex8r_op_stress_cauchy_n3_wrapper(J_calc,
+     &                       B_bar_loc, C10, C20, C30, D1, D2, D3,
+     &                       stressCauchy_voigt)
                         
 C                       Store PK-II stress for internal force calculation
                         stress = stressPK2_voigt
@@ -597,13 +601,13 @@ C                       Store PK-II stress for internal force calculation
 C                       Store Cauchy stress for post-processing
                         svars(kblock, 7:12) = stressCauchy_voigt
                         
-C                       Calculate material tangents from generated operators
-                        call hex8r_op_dmat_pk2_n3_wrapper(F_loc,
-     &                       C_bar_loc, Cinv_loc, J_calc, I1_loc_pk2,
-     &                       C10, C20, C30, D1, D2, D3,
-     &                       DMAT_PK2_loc)
-                        call hex8r_op_dmat_n3_wrapper(F_loc, B_bar_loc,
-     &                       J_calc, I1_loc, C10, C20, C30,
+C                       B5d. Calculate material tangents from kinematics
+                        call hex8r_op_dmat_pk2_n3_wrapper(C_bar_loc,
+     &                       Cinv_loc, J_calc, I1_bar_C,
+     &                       J_minus_2_3_calc, C10, C20, C30, D1, D2,
+     &                       D3, DMAT_PK2_loc)
+                        call hex8r_op_dmat_n3_wrapper(B_bar_loc,
+     &                       J_calc, I1_bar_B, C10, C20, C30,
      &                       D1, D2, D3, DMAT_CURRENT)
                       end block
                       

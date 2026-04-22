@@ -15,3 +15,4 @@ test_case/test_report.txt
 .venv
 /.codebuddy/agents
 /.codebuddy
+/python_jax/code_gen/hex8r_gen

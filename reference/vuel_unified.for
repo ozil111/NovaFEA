@@ -76,7 +76,7 @@ C
 C     ================================================================
 C
       use constants_module
-    !   include 'vaba_param.inc'
+      include 'vaba_param.inc'
 
 C     Operation codes
       parameter ( jMassCalc            = 1,
@@ -170,6 +170,11 @@ C     Mass matrix calculation variables
       data w    /  1.0D0, 1.0D0, 1.0D0, 1.0D0, 1.0D0, 1.0D0, 1.0D0, 1.0D0 /
 
       logical, save :: firstrun = .true.
+
+    !   integer* 8 flag
+    !     write(*,*) "stop for debug:"
+    !     read(*,*) flag
+    !     write(*,*) "continue..."
 
 C     ================================================================
 C     INITIALIZATION AND VALIDATION
@@ -592,8 +597,9 @@ C                       Calculate kinematic quantities for DMAT
                         B_bar_loc = J_23 * B_loc
                         I1_loc = B_bar_loc(1,1)+B_bar_loc(2,2)+B_bar_loc(3,3)
                         
-C                       Calculate material tangent in PK2 framework
-                        CALL CALC_EXACT_DMAT_PK2_N3(DMAT_CURRENT, F_loc, 
+C                       Calculate material tangent in Cauchy framework (dσ/dε)
+C                       Used for hourglass control (NOT PK2 tangent dS/dC)
+                        CALL CALC_EXACT_DMAT_N3(DMAT_CURRENT, F_loc, 
      &                      J_calc, B_bar_loc, I1_loc,
      &                      C10, C20, C30, D1, D2, D3)
                       end block
@@ -667,15 +673,13 @@ C                     Linear: Use current B-matrix and current volume (Updated L
                       rhs(kblock,:) = matmul(transpose(B), stress) * DETJ * WG
                   endif
 
-C                 Only print detailed RHS for first element at selected increments
-                  if(firstrun .and. kblock .eq. 1) then
-                      write(*,'(A,I0,A,I0,A)') "  [RHS_OUTPUT] Step ", kstep, 
-     &                    " Inc ", kinc, " - Initial RHS (before hourglass):"
-                      do I=1,24
-                          write(*,'(A,I2,A,E15.8)') "    DOF ", I, 
-     &                        ": ", rhs(kblock,I)
-                      enddo
-                  endif
+C                 ================================================================
+C                 === DEBUG OUTPUT: RHS_INIT (after internal force, before hourglass) ===
+C                 ================================================================
+                  write(*,'(A, I0, A, I0, A, 24(E15.8, 1X))') 
+     & "[FOR_RHS_INIT] Cycle=", kstep*1000+kinc, 
+     & " Elem=", jElem(kblock), 
+     & " DOF=", (rhs(kblock,I), I=1,24)
 
 C                 ================================================================
 C                 === Step 4: UNIFIED HOURGLASS CONTROL ===
@@ -810,14 +814,13 @@ C                 Only print FHG and final RHS for first element at selected inc
                   if(firstrun) write(*,*) "  [Hourglass] Adding F_stab to RHS..."
                   rhs(kblock,:) = rhs(kblock,:) + fHG
                   
-                  if(firstrun .and. kblock .eq. 1) then
-                      write(*,'(A,I0,A,I0,A)') "  [RHS_FINAL] Step ", kstep, 
-     &                    " Inc ", kinc, " - Final RHS (after hourglass):"
-                      do I=1,24
-                          write(*,'(A,I2,A,E15.8)') "    DOF ", I, 
-     &                        ": ", rhs(kblock,I)
-                      enddo
-                  endif
+C                 ================================================================
+C                 === DEBUG OUTPUT: RHS_FINAL (after hourglass) ===
+C                 ================================================================
+                  write(*,'(A, I0, A, I0, A, 24(E15.8, 1X))') 
+     & "[FOR_RHS_FINAL] Cycle=", kstep*1000+kinc, 
+     & " Elem=", jElem(kblock), 
+     & " DOF=", (rhs(kblock,I), I=1,24)
                   
                   svars(kblock, 25:48) = u(kblock,:)
 
@@ -1308,7 +1311,11 @@ C     Convert to Voigt notation
       INTEGER :: i, j_tensor, k, l, m, n
       
       INTEGER :: map(6,2)
-      DATA map / 1,1, 2,2, 3,3, 1,2, 2,3, 1,3 /
+C     Fortran DATA fills arrays column-major!
+C     map(:,1) = [1,2,3,1,2,1] (i indices)
+C     map(:,2) = [1,2,3,2,3,3] (j indices)
+C     Voigt order: 11, 22, 33, 12, 23, 13
+      DATA map / 1,2,3,1,2,1, 1,2,3,2,3,3 /
 
       DMAT = 0.0D0
       I_den = 0.0D0
@@ -1406,7 +1413,11 @@ C     ------------------------------------------------------------------
       INTEGER :: i, j_tensor, k, l, m, n
       
       INTEGER :: map(6,2)
-      DATA map / 1,1, 2,2, 3,3, 1,2, 2,3, 1,3 /
+C     Fortran DATA fills arrays column-major!
+C     map(:,1) = [1,2,3,1,2,1] (i indices)
+C     map(:,2) = [1,2,3,2,3,3] (j indices)
+C     Voigt order: 11, 22, 33, 12, 23, 13
+      DATA map / 1,2,3,1,2,1, 1,2,3,2,3,3 /
 
       DMAT = 0.0D0
       I_den = 0.0D0
