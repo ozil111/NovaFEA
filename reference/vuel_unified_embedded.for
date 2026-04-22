@@ -26,18 +26,18 @@
 
 #include "hex8r_generated_wrappers.f90"
 #include "hex8r_op_bbar_grad_gen.for"
-#include "hex8r_op_constitutive_linear_gen.for"
-#include "hex8r_op_dmat_n3_gen.for"
-#include "hex8r_op_dmat_pk2_n3_gen.for"
+#include "mat_op_constitutive_linear_gen.for"
+#include "mat_op_dmat_n3_gen.for"
+#include "mat_op_dmat_pk2_n3_gen.for"
 #include "hex8r_op_jacobian_center_gen.for"
 #include "hex8r_op_form_B_gen.for"
 #include "hex8r_op_hourglass_gamma_gen.for"
 #include "hex8r_op_internal_force_gen.for"
 #include "hex8r_op_k_matrices_gen.for"
 #include "hex8r_op_kinematics_gen.for"
-#include "hex8r_op_rot_dmtx_gen.for"
-#include "hex8r_op_stress_cauchy_n3_gen.for"
-#include "hex8r_op_stress_pk2_n3_gen.for"
+#include "mat_op_rot_dmtx_gen.for"
+#include "mat_op_stress_cauchy_n3_gen.for"
+#include "mat_op_stress_pk2_n3_gen.for"
 
       SUBROUTINE VUEL(nblock,rhs,amass,dtimeStable,svars,nsvars,
      1                energy,
@@ -479,7 +479,7 @@ C                     ==========================================================
                       if(firstrun) write(*,*) "  [Linear] UL with Hughes-Winget rotation..."
                       
 C                     A1. Calculate constant DMAT (material properties)
-                      call hex8r_op_constitutive_linear_wrapper(
+                      call mat_op_constitutive_linear_wrapper(
      &                     E_linear, nu_linear, DMAT_CURRENT)
                       
 C                     A2. Load old stress and convert to matrix form
@@ -585,13 +585,13 @@ C                       B5a. Compute kinematics from F
      &                       J_minus_2_3_calc)
                         
 C                       B5b. Calculate PK-II stress using kinematics outputs
-                        call hex8r_op_stress_pk2_n3_wrapper(J_calc,
+                        call mat_op_stress_pk2_n3_wrapper(J_calc,
      &                       J_minus_2_3_calc, Cinv_loc, C_bar_loc,
      &                       I1_bar_C, C10, C20, C30, D1, D2, D3,
      &                       stressPK2_voigt)
                         
 C                       B5c. Calculate Cauchy stress for post-processing
-                        call hex8r_op_stress_cauchy_n3_wrapper(J_calc,
+                        call mat_op_stress_cauchy_n3_wrapper(J_calc,
      &                       B_bar_loc, C10, C20, C30, D1, D2, D3,
      &                       stressCauchy_voigt)
                         
@@ -602,11 +602,11 @@ C                       Store Cauchy stress for post-processing
                         svars(kblock, 7:12) = stressCauchy_voigt
                         
 C                       B5d. Calculate material tangents from kinematics
-                        call hex8r_op_dmat_pk2_n3_wrapper(C_bar_loc,
+                        call mat_op_dmat_pk2_n3_wrapper(C_bar_loc,
      &                       Cinv_loc, J_calc, I1_bar_C,
      &                       J_minus_2_3_calc, C10, C20, C30, D1, D2,
      &                       D3, DMAT_PK2_loc)
-                        call hex8r_op_dmat_n3_wrapper(B_bar_loc,
+                        call mat_op_dmat_n3_wrapper(B_bar_loc,
      &                       J_calc, I1_bar_B, C10, C20, C30,
      &                       D1, D2, D3, DMAT_CURRENT)
                       end block
@@ -1034,7 +1034,7 @@ C     ================================================================
       j_bar_0 = 1.0D0 / (U_diag_inv(1,1) * U_diag_inv(2,2) * U_diag_inv(3,3))
       rj = j0 / j_bar_0
       
-      call hex8r_op_rot_dmtx_wrapper(DMAT, hat_J0_inv, rj, Cmtxh)
+      call mat_op_rot_dmtx_wrapper(DMAT, hat_J0_inv, rj, Cmtxh)
       Cmtxh = SCALE_C_TILDE * Cmtxh
       
       RETURN

@@ -154,17 +154,17 @@
       call compute_hex8r_op_internal_force(in_vec, fint)
       end subroutine hex8r_op_internal_force_wrapper
 
-      subroutine hex8r_op_constitutive_linear_wrapper(E, nu, D)
+      subroutine mat_op_constitutive_linear_wrapper(E, nu, D)
       implicit none
       real*8 E, nu, D(6,6)
       real*8 in_vec(2), out_vec(36)
 
       in_vec(1) = E
       in_vec(2) = nu
-      call compute_hex8r_op_constitutive_linear(in_vec, out_vec)
+      call compute_mat_op_constitutive_linear(in_vec, out_vec)
 
       call unpack_2d_rowmajor(out_vec, 6, 6, D)
-      end subroutine hex8r_op_constitutive_linear_wrapper
+      end subroutine mat_op_constitutive_linear_wrapper
 
       subroutine hex8r_op_kinematics_wrapper(F, J, B, B_bar, I1_bar_B,
      1 C, C_bar, Cinv, I1_bar_C, J_minus_2_3)
@@ -188,7 +188,7 @@
       J_minus_2_3 = out_vec(49)
       end subroutine hex8r_op_kinematics_wrapper
 
-      subroutine hex8r_op_stress_cauchy_n3_wrapper(J, B_bar, C10, C20,
+      subroutine mat_op_stress_cauchy_n3_wrapper(J, B_bar, C10, C20,
      1 C30, D1, D2, D3, stress)
       implicit none
       real*8 J, B_bar(3,3), C10, C20, C30, D1, D2, D3, stress(6)
@@ -203,12 +203,12 @@
       in_vec(15) = D2
       in_vec(16) = D3
 
-      call compute_hex8r_op_stress_cauchy_n3(in_vec, out_vec)
+      call compute_mat_op_stress_cauchy_n3(in_vec, out_vec)
 
       stress = out_vec(1:6)
-      end subroutine hex8r_op_stress_cauchy_n3_wrapper
+      end subroutine mat_op_stress_cauchy_n3_wrapper
 
-      subroutine hex8r_op_stress_pk2_n3_wrapper(J, J_minus_2_3, Cinv,
+      subroutine mat_op_stress_pk2_n3_wrapper(J, J_minus_2_3, Cinv,
      1 C_bar, I1_bar, C10, C20, C30, D1, D2, D3, stress)
       implicit none
       real*8 J, J_minus_2_3, Cinv(3,3), C_bar(3,3), I1_bar
@@ -227,12 +227,12 @@
       in_vec(26) = D2
       in_vec(27) = D3
 
-      call compute_hex8r_op_stress_pk2_n3(in_vec, out_vec)
+      call compute_mat_op_stress_pk2_n3(in_vec, out_vec)
 
       stress = out_vec(1:6)
-      end subroutine hex8r_op_stress_pk2_n3_wrapper
+      end subroutine mat_op_stress_pk2_n3_wrapper
 
-      subroutine hex8r_op_dmat_n3_wrapper(B_bar, J, I1_bar, C10, C20,
+      subroutine mat_op_dmat_n3_wrapper(B_bar, J, I1_bar, C10, C20,
      1 C30, D1, D2, D3, D)
       implicit none
       real*8 B_bar(3,3), J, I1_bar, C10, C20, C30, D1, D2, D3
@@ -249,12 +249,12 @@
       in_vec(16) = D2
       in_vec(17) = D3
 
-      call compute_hex8r_op_dmat_n3(in_vec, out_vec)
+      call compute_mat_op_dmat_n3(in_vec, out_vec)
 
       call unpack_2d_rowmajor(out_vec, 6, 6, D)
-      end subroutine hex8r_op_dmat_n3_wrapper
+      end subroutine mat_op_dmat_n3_wrapper
 
-      subroutine hex8r_op_dmat_pk2_n3_wrapper(C_bar, Cinv, J, I1_bar,
+      subroutine mat_op_dmat_pk2_n3_wrapper(C_bar, Cinv, J, I1_bar,
      1 J_minus_2_3, C10, C20, C30, D1, D2, D3, D)
       implicit none
       real*8 C_bar(3,3), Cinv(3,3), J, I1_bar, J_minus_2_3
@@ -273,10 +273,10 @@
       in_vec(26) = D2
       in_vec(27) = D3
 
-      call compute_hex8r_op_dmat_pk2_n3(in_vec, out_vec)
+      call compute_mat_op_dmat_pk2_n3(in_vec, out_vec)
 
       call unpack_2d_rowmajor(out_vec, 6, 6, D)
-      end subroutine hex8r_op_dmat_pk2_n3_wrapper
+      end subroutine mat_op_dmat_pk2_n3_wrapper
 
       subroutine hex8r_op_hourglass_gamma_wrapper(BiI, COORD, gammas)
       implicit none
@@ -298,7 +298,7 @@
       call unpack_2d_rowmajor(out_vec, 8, 4, gammas)
       end subroutine hex8r_op_hourglass_gamma_wrapper
 
-      subroutine hex8r_op_rot_dmtx_wrapper(D, J0Inv, rj, D_rotated)
+      subroutine mat_op_rot_dmtx_wrapper(D, J0Inv, rj, D_rotated)
       implicit none
       real*8 D(6,6), J0Inv(3,3), rj, D_rotated(6,6)
       real*8 in_vec(46), out_vec(36)
@@ -307,10 +307,10 @@
       call pack_2d_rowmajor(J0Inv, 3, 3, in_vec(37:45))
       in_vec(46) = rj
 
-      call compute_hex8r_op_rot_dmtx(in_vec, out_vec)
+      call compute_mat_op_rot_dmtx(in_vec, out_vec)
 
       call unpack_2d_rowmajor(out_vec, 6, 6, D_rotated)
-      end subroutine hex8r_op_rot_dmtx_wrapper
+      end subroutine mat_op_rot_dmtx_wrapper
 
       subroutine hex8r_op_k_matrices_wrapper(C_tilde, VOL, Kmat,
      1 K_alpha_u, K_alpha_alpha)

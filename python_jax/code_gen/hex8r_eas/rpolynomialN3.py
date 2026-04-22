@@ -98,7 +98,7 @@ def n3_deviatoric_energy_derivatives(I1_bar, C10, C20, C30):
 
 
 def _deviatoric_energy_n3(I1_bar, C10, C20, C30):
-    """3rd-order Ogden deviatoric strain energy W_dev(I1_bar)."""
+    """3rd-order reduced polynomial deviatoric strain energy W_dev(I1_bar)."""
     i1_shift = I1_bar - 3
     return C10 * i1_shift + C20 * i1_shift**2 + C30 * i1_shift**3
 
@@ -165,7 +165,7 @@ def build_voigt_transform(J0inv: sp.Matrix):
 # Material operators
 # -----------------------------------------------------------------------------
 
-def build_hex8r_op_constitutive_linear():
+def build_mat_op_constitutive_linear():
     E = sp.Symbol("E", real=True)
     nu = sp.Symbol("nu", real=True)
     c1 = E / ((1 + nu) * (1 - 2 * nu))
@@ -188,14 +188,14 @@ def build_hex8r_op_constitutive_linear():
     return MathModel(
         inputs=[E, nu],
         outputs=flatten_row_major(D),
-        name="hex8r_op_constitutive_linear",
+        name="mat_op_constitutive_linear",
         input_names=["E", "nu"],
         output_names=[f"D({i+1},{j+1})" for i in range(6) for j in range(6)],
         is_operator=True,
     )
 
 
-def build_hex8r_op_rot_dmtx():
+def build_mat_op_rot_dmtx():
     D = mat_symbols("D", 6, 6)
     J0inv = mat_symbols("J0inv", 3, 3)
     rj = sp.Symbol("rj", real=True)
@@ -214,17 +214,17 @@ def build_hex8r_op_rot_dmtx():
     return MathModel(
         inputs=inputs,
         outputs=outputs,
-        name="hex8r_op_rot_dmtx",
+        name="mat_op_rot_dmtx",
         input_names=input_names,
         output_names=output_names,
         is_operator=True,
     )
 
 
-def build_hex8r_op_stress_cauchy_n3():
-    """N3 Ogden Cauchy stress.
+def build_mat_op_stress_cauchy_n3():
+    """N3 reduced polynomial Cauchy stress.
 
-    Inputs are kinematic quantities (from ``hex8r_op_kinematics``) and
+    Inputs are kinematic quantities (from ``mat_op_kinematics``) and
     material parameters — no deformation gradient F is needed.
     """
     J = sp.Symbol("J", real=True)
@@ -257,17 +257,17 @@ def build_hex8r_op_stress_cauchy_n3():
     return MathModel(
         inputs=inputs,
         outputs=outputs,
-        name="hex8r_op_stress_cauchy_n3",
+        name="mat_op_stress_cauchy_n3",
         input_names=input_names,
         output_names=output_names,
         is_operator=True,
     )
 
 
-def build_hex8r_op_stress_pk2_n3():
-    """N3 Ogden 2nd Piola-Kirchhoff stress.
+def build_mat_op_stress_pk2_n3():
+    """N3 reduced polynomial 2nd Piola-Kirchhoff stress.
 
-    Inputs are kinematic quantities (from ``hex8r_op_kinematics``) and
+    Inputs are kinematic quantities (from ``mat_op_kinematics``) and
     material parameters — no deformation gradient F is needed.
     """
     J = sp.Symbol("J", real=True)
@@ -315,15 +315,15 @@ def build_hex8r_op_stress_pk2_n3():
     return MathModel(
         inputs=inputs,
         outputs=outputs,
-        name="hex8r_op_stress_pk2_n3",
+        name="mat_op_stress_pk2_n3",
         input_names=input_names,
         output_names=output_names,
         is_operator=True,
     )
 
 
-def build_hex8r_op_dmat_n3():
-    """N3 Ogden Cauchy tangent modulus (material).
+def build_mat_op_dmat_n3():
+    """N3 reduced polynomial Cauchy tangent modulus (material).
 
     F has been removed from inputs as it was unused in the computation.
     """
@@ -383,15 +383,15 @@ def build_hex8r_op_dmat_n3():
     return MathModel(
         inputs=inputs,
         outputs=outputs,
-        name="hex8r_op_dmat_n3",
+        name="mat_op_dmat_n3",
         input_names=input_names,
         output_names=output_names,
         is_operator=True,
     )
 
 
-def build_hex8r_op_dmat_pk2_n3():
-    """N3 Ogden PK2 tangent modulus (material).
+def build_mat_op_dmat_pk2_n3():
+    """N3 reduced polynomial PK2 tangent modulus (material).
 
     F has been removed from inputs as it was unused in the computation.
     """
@@ -453,7 +453,7 @@ def build_hex8r_op_dmat_pk2_n3():
     return MathModel(
         inputs=inputs,
         outputs=outputs,
-        name="hex8r_op_dmat_pk2_n3",
+        name="mat_op_dmat_pk2_n3",
         input_names=input_names,
         output_names=output_names,
         is_operator=True,
@@ -466,10 +466,10 @@ def build_hex8r_op_dmat_pk2_n3():
 
 def get_model():
     return [
-        build_hex8r_op_constitutive_linear(),
-        build_hex8r_op_rot_dmtx(),
-        build_hex8r_op_stress_cauchy_n3(),
-        build_hex8r_op_stress_pk2_n3(),
-        build_hex8r_op_dmat_n3(),
-        build_hex8r_op_dmat_pk2_n3(),
+        build_mat_op_constitutive_linear(),
+        build_mat_op_rot_dmtx(),
+        build_mat_op_stress_cauchy_n3(),
+        build_mat_op_stress_pk2_n3(),
+        build_mat_op_dmat_n3(),
+        build_mat_op_dmat_pk2_n3(),
     ]
