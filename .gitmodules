@@ -1,0 +1,3 @@
+[submodule "extern/fea_codegen"]
+	path = extern/fea_codegen
+	url = git@github.com:ozil111/fea_codegen.git

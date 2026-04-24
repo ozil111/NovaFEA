@@ -85,7 +85,8 @@ python test.py
 .
 ├── system/             # C++ 核心系统（求解器、装配、IO 等）
 ├── data_center/        # C++ 核心数据（网格、组件、上下文等）
-├── python_jax/         # Python/JAX 生态系统与代码生成
+├── extern/fea_codegen/ # FEA 代码生成器（git submodule）
+├── docs/demos/jax/     # JAX 示例脚本
 ├── case/               # 仿真算例输入文件
 ├── build_scripts/      # 基础构建脚本 (vcpkg_install, build)
 ├── test/               # C++ 单元测试
