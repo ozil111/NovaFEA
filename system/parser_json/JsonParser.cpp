@@ -310,14 +310,15 @@ void JsonParser::parse_materials(
         entt::entity e = registry.create();
         registry.emplace<Component::MaterialID>(e, mid);
 
-        // 根据 type_id 附加不同的参数组�?
+        // 根据 type_id 附加不同的参数组件
         switch (type_id) {
-            case 1: { // 线弹性材�?
+            case 1: { // 线弹性材料
                 Component::LinearElasticParams params;
                 params.rho = mat["rho"];
                 params.E = mat["E"];
                 params.nu = mat["nu"];
                 registry.emplace<Component::LinearElasticParams>(e, params);
+                registry.emplace<Component::MaterialModel>(e, Component::MaterialModel{Component::material_model_from_typeid(type_id)});
                 spdlog::debug("  Created LinearElastic Material {}: E={}, nu={}", mid, params.E, params.nu);
                 break;
             }
