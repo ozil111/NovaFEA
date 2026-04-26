@@ -66,7 +66,7 @@ bool AssemblySystem::compute_element_stiffness_dispatcher(
         return false;
     }
     
-    const Eigen::Matrix<double, 6, 6>& D = material_matrix.D;
+    Eigen::Map<Eigen::Matrix<double, 6, 6, Eigen::RowMajor>> D(const_cast<double*>(material_matrix.D));
 
     switch (type_id) {
         case 308: {  // Hexa8 (C3D8R)

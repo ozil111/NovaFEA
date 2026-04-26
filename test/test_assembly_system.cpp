@@ -168,7 +168,7 @@ TEST_F(AssemblySystemTest, DofNumberingSystemTest) {
 // Test LinearElasticMatrixSystem
 TEST_F(AssemblySystemTest, LinearElasticMatrixSystemTest) {
     // Compute linear elastic matrix
-    LinearElasticMatrixSystem::compute_linear_elastic_matrix(registry);
+    compute_single_linear_elastic_matrix(registry, material_entity);
     
     // Check that LinearElasticMatrix component exists
     ASSERT_TRUE(registry.all_of<Component::LinearElasticMatrix>(material_entity));
@@ -177,17 +177,14 @@ TEST_F(AssemblySystemTest, LinearElasticMatrixSystemTest) {
     
     const auto& D = matrix_comp.D;
     
-    // Check matrix size (6x6)
-    EXPECT_EQ(D.rows(), 6);
-    EXPECT_EQ(D.cols(), 6);
-    
     // Note: D matrix uses Abaqus/Fortran Voigt order: [xx, yy, zz, xy, yz, xz]
     // Index mapping: 0->XX, 1->YY, 2->ZZ, 3->XY, 4->YZ, 5->XZ
+    // D is row-major: D[row * 6 + col]
     
     // Check symmetry
-    EXPECT_NEAR(D(0, 1), D(1, 0), 1e-10);
-    EXPECT_NEAR(D(0, 2), D(2, 0), 1e-10);
-    EXPECT_NEAR(D(1, 2), D(2, 1), 1e-10);
+    EXPECT_NEAR(D[0 * 6 + 1], D[1 * 6 + 0], 1e-10);
+    EXPECT_NEAR(D[0 * 6 + 2], D[2 * 6 + 0], 1e-10);
+    EXPECT_NEAR(D[1 * 6 + 2], D[2 * 6 + 1], 1e-10);
     
     // Check diagonal elements (should be lambda + 2*mu)
     double E = 210000.0;
@@ -196,31 +193,31 @@ TEST_F(AssemblySystemTest, LinearElasticMatrixSystemTest) {
     double mu = E / (2.0 * (1.0 + nu));
     double diag_expected = lambda + 2.0 * mu;
     
-    EXPECT_NEAR(D(0, 0), diag_expected, 1e-6);  // XX-XX
-    EXPECT_NEAR(D(1, 1), diag_expected, 1e-6);  // YY-YY
-    EXPECT_NEAR(D(2, 2), diag_expected, 1e-6);  // ZZ-ZZ
+    EXPECT_NEAR(D[0 * 6 + 0], diag_expected, 1e-6);  // XX-XX
+    EXPECT_NEAR(D[1 * 6 + 1], diag_expected, 1e-6);  // YY-YY
+    EXPECT_NEAR(D[2 * 6 + 2], diag_expected, 1e-6);  // ZZ-ZZ
     
     // Check off-diagonal elements (should be lambda)
-    EXPECT_NEAR(D(0, 1), lambda, 1e-6);  // XX-YY
-    EXPECT_NEAR(D(0, 2), lambda, 1e-6);  // XX-ZZ
-    EXPECT_NEAR(D(1, 2), lambda, 1e-6);  // YY-ZZ
+    EXPECT_NEAR(D[0 * 6 + 1], lambda, 1e-6);  // XX-YY
+    EXPECT_NEAR(D[0 * 6 + 2], lambda, 1e-6);  // XX-ZZ
+    EXPECT_NEAR(D[1 * 6 + 2], lambda, 1e-6);  // YY-ZZ
     
     // Check shear terms (should be mu)
-    EXPECT_NEAR(D(3, 3), mu, 1e-6);  // XY-XY
-    EXPECT_NEAR(D(4, 4), mu, 1e-6);  // YZ-YZ
-    EXPECT_NEAR(D(5, 5), mu, 1e-6);  // XZ-XZ
+    EXPECT_NEAR(D[3 * 6 + 3], mu, 1e-6);  // XY-XY
+    EXPECT_NEAR(D[4 * 6 + 4], mu, 1e-6);  // YZ-YZ
+    EXPECT_NEAR(D[5 * 6 + 5], mu, 1e-6);  // XZ-XZ
 }
 
 // Test C3D8R stiffness matrix computation
 TEST_F(AssemblySystemTest, C3D8RStiffnessMatrixTest) {
     // First compute material matrix
-    LinearElasticMatrixSystem::compute_linear_elastic_matrix(registry);
+    compute_single_linear_elastic_matrix(registry, material_entity);
     const auto& matrix_comp = registry.get<Component::LinearElasticMatrix>(material_entity);
-    const auto& D = matrix_comp.D;
     
     // Compute element stiffness matrix
     // Note: This includes both volumetric stiffness (B-bar method) 
     // and hourglass stiffness (Puso EAS method)
+    Eigen::Map<Eigen::Matrix<double, 6, 6, Eigen::RowMajor>> D(const_cast<double*>(matrix_comp.D));
     Eigen::MatrixXd Ke;
     compute_c3d8r_stiffness_matrix(registry, element_entity, D, Ke);
     
@@ -251,7 +248,7 @@ TEST_F(AssemblySystemTest, C3D8RStiffnessMatrixTest) {
 // Test AssemblySystem dispatcher
 TEST_F(AssemblySystemTest, AssemblySystemDispatcherTest) {
     // First compute material matrix
-    LinearElasticMatrixSystem::compute_linear_elastic_matrix(registry);
+    compute_single_linear_elastic_matrix(registry, material_entity);
     
     // Test dispatcher
     double Ke_raw[AssemblySystem::MAX_ELEMENT_DOFS * AssemblySystem::MAX_ELEMENT_DOFS];
@@ -280,7 +277,7 @@ TEST_F(AssemblySystemTest, FullAssemblySystemTest) {
     EXPECT_EQ(dof_map.num_total_dofs, 24);
     
     // Step 2: Compute material matrices
-    LinearElasticMatrixSystem::compute_linear_elastic_matrix(registry);
+    compute_single_linear_elastic_matrix(registry, material_entity);
     
     // Step 3: Assemble global stiffness matrix
     // The C3D8R elements include both volumetric stiffness (B-bar) 
@@ -328,7 +325,7 @@ TEST_F(AssemblySystemTest, MultipleElementsAssemblyTest) {
     DofNumberingSystem::build_dof_map(registry);
     
     // Compute material matrices
-    LinearElasticMatrixSystem::compute_linear_elastic_matrix(registry);
+    compute_single_linear_elastic_matrix(registry, material_entity);
     
     // Assemble global stiffness matrix
     AssemblySystem::SparseMatrix K_global;

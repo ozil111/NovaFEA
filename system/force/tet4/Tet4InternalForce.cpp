@@ -104,7 +104,7 @@ bool compute_tet4_internal_forces(entt::registry& registry, entt::entity element
     const auto& D = material_matrix.D;
     for (int r = 0; r < 6; ++r) {
         for (int c = 0; c < 6; ++c) {
-            assembly_in[12 + 6 * r + c] = D(r, c);
+            assembly_in[12 + 6 * r + c] = D[r * 6 + c];
         }
     }
 

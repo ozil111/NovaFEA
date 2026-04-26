@@ -15,12 +15,12 @@ namespace tui {
 
 namespace {
 
-Element matrix_6x6_element(const Eigen::Matrix<double, 6, 6>& D) {
+Element matrix_6x6_element(const double* D) {
     Elements rows;
     for (int i = 0; i < 6; ++i) {
         std::ostringstream line;
         for (int j = 0; j < 6; ++j)
-            line << std::setw(12) << std::fixed << std::setprecision(4) << D(i, j);
+            line << std::setw(12) << std::fixed << std::setprecision(4) << D[i * 6 + j];
         rows.push_back(text("    " + line.str()));
     }
     return vbox(std::move(rows));

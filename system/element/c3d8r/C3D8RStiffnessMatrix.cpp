@@ -748,7 +748,7 @@ Eigen::Matrix<double, 24, 24> compute_c3d8r_stiffness_matrix(
         throw std::runtime_error("Material D matrix not initialized. "
                                 "Please call LinearElasticMatrixSystem::compute_linear_elastic_matrix() first.");
     }
-    const Eigen::Matrix<double, 6, 6>& D = material_matrix.D;
+    Eigen::Map<Eigen::Matrix<double, 6, 6, Eigen::RowMajor>> D(const_cast<double*>(material_matrix.D));
 
     Eigen::MatrixXd Ke_buffer;
     compute_c3d8r_stiffness_matrix(registry, element_entity, D, Ke_buffer);

@@ -10,7 +10,6 @@
 
 #include <vector>
 #include <string>
-#include <Eigen/Dense>
 #include <entt/entt.hpp>
 
 /**
@@ -53,8 +52,9 @@ namespace Component {
      * Uses Abaqus/Fortran order: xx, yy, zz, xy, yz, xz
      */
     struct LinearElasticMatrix {
-        // Use Eigen to store 6x6 matrix (Voigt notation: xx, yy, zz, xy, yz, xz - Abaqus/Fortran order)
-        Eigen::Matrix<double, 6, 6> D;
+        // Row-major 6x6 matrix stored as flat array (Voigt notation: xx, yy, zz, xy, yz, xz - Abaqus/Fortran order)
+        // Access: D[row * 6 + col]
+        double D[36] = {};
         
         // Flag whether initialized, prevent redundant calculation
         bool is_initialized = false;

@@ -121,7 +121,7 @@ bool compute_c3d8r_internal_forces(entt::registry& registry, entt::entity elemen
         return false;
     }
 
-    const Eigen::Matrix<double, 6, 6>& D = material_matrix.D;
+    Eigen::Map<Eigen::Matrix<double, 6, 6, Eigen::RowMajor>> D(const_cast<double*>(material_matrix.D));
 
     // Get current and initial node coordinates
     Eigen::Matrix<double, 8, 3> coords_current;

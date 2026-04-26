@@ -9,6 +9,7 @@
 #include "LinearElasticMatrixSystem.h"
 #include "isotropic_D_gen.cpp"
 #include <spdlog/spdlog.h>
+#include <algorithm>
 
 void compute_single_linear_elastic_matrix(entt::registry& registry, entt::entity entity){
     const auto& params = registry.get<const Component::LinearElasticParams>(entity);
@@ -19,12 +20,7 @@ void compute_single_linear_elastic_matrix(entt::registry& registry, entt::entity
     double out[36] = {};
     compute_isotropic_D(in, out);
 
-    Eigen::Matrix<double, 6, 6> D;
-    for (int i = 0; i < 6; ++i)
-        for (int j = 0; j < 6; ++j)
-            D(i, j) = out[i * 6 + j];
-
     auto& matrix_comp = registry.get_or_emplace<Component::LinearElasticMatrix>(entity);
-    matrix_comp.D = D;
+    std::copy(out, out + 36, matrix_comp.D);
     matrix_comp.is_initialized = true;
 }
