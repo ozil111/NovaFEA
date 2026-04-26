@@ -12,12 +12,13 @@
 #include "DataContext.h"
 #include "components/mesh_components.h"
 #include "components/analysis_component.h"
+#include "components/simdroid_components.h"
 #include "dof/DofNumberingSystem.h"
 #include "mass/MassSystem.h"
 #include "force/InternalForceSystem.h"
 #include "load/LoadSystem.h"
 #include "explicit/ExplicitSolver.h"
-#include "material/mat1/LinearElasticMatrixSystem.h"
+#include "material/dmatMain.h"
 #include "output/VtuExporter.h"
 #include <filesystem>
 #include <iomanip>
@@ -31,8 +32,17 @@ void run_explicit_solver(DataContext& data_context) {
     spdlog::info("Starting explicit dynamics solver...");
     
     // 1. Initialize material D matrices
-    spdlog::info("Computing material D matrices...");
-    LinearElasticMatrixSystem::compute_linear_elastic_matrix(data_context.registry);
+    auto part_view = data_context.registry.view<Component::SimdroidPart>();
+        size_t part_count = 0;
+        for (auto part_entity : part_view) {
+            const auto& part = data_context.registry.get<Component::SimdroidPart>(part_entity);
+            spdlog::info("  Part '{}': computing D matrix for material...", part.name);
+
+            auto material_entity = part.material;
+            dmat_main(data_context.registry, material_entity);
+
+            part_count++;
+    }
     
     // 2. Build DOF map (needed for boundary conditions)
     spdlog::info("Building DOF map...");

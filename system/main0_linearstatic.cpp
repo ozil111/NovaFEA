@@ -16,7 +16,10 @@
 #include "components/load_components.h"
 #include "dof/DofNumberingSystem.h"
 #include "load/LoadSystem.h"
+#include "material/dmatMain.h"
 #include "material/mat1/LinearElasticMatrixSystem.h"
+#include "material/dmatMain.h"
+#include "components/simdroid_components.h"
 #include "mesh/TopologySystems.h"
 #include "output/VtuExporter.h"
 
@@ -132,9 +135,22 @@ void run_linearstatic_solver(DataContext& data_context) {
 
     auto& registry = data_context.registry;
 
-    // 1) Material D matrices
-    spdlog::info("Computing material D matrices...");
-    LinearElasticMatrixSystem::compute_linear_elastic_matrix(registry);
+    // 1) Material D matrices per part
+    spdlog::info("Computing material D matrices per part...");
+    {
+        auto part_view = registry.view<Component::SimdroidPart>();
+        size_t part_count = 0;
+        for (auto part_entity : part_view) {
+            const auto& part = registry.get<Component::SimdroidPart>(part_entity);
+            spdlog::info("  Part '{}': computing D matrix for material...", part.name);
+
+            auto material_entity = part.material;
+            dmat_main(registry, material_entity);
+
+            part_count++;
+        }
+        spdlog::info("Computed D matrices for {} part(s).", part_count);
+    }
 
     // 2) DOF map
     spdlog::info("Building DOF map...");
